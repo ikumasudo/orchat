@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: orchat
+      POSTGRES_PASSWORD: orchat
+      POSTGRES_DB: orchat
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+  app:
+    build: .
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://orchat:orchat@db:5432/orchat
+    ports: ["3000:3000"]
+    depends_on: [db]
+volumes:
+  pgdata:
