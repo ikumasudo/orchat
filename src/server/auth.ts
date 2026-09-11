@@ -1,5 +1,6 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { getAuth, type OidcClaimsHook } from '@hono/oidc-auth'
+import * as oauth2 from 'oauth4webapi'
 import { db, schema } from './db/index.js'
 
 export type User = { id: string; email: string; name: string; admin: boolean }
@@ -29,6 +30,21 @@ export async function currentUser(c: Context): Promise<User | null> {
   const auth = await getAuth(c)
   if (!auth?.sub) return null
   return upsertUser(auth.sub, auth.email ?? auth.sub, (auth.name as string | undefined) ?? auth.email ?? '')
+}
+
+// discovery は起動後 1 回だけ。@hono/oidc-auth はリクエストごとに fetch し、かつ scopes_supported を必須にするが
+// mock IdP (navikt/mock-oauth2-server) は返さないので OIDC_SCOPES で補う。Entra ID は返すので無影響
+let discovered: Promise<oauth2.AuthorizationServer> | undefined
+export const oidcServer: MiddlewareHandler = async (c, next) => {
+  if (process.env.OIDC_ISSUER) {
+    discovered ??= (async () => {
+      const issuer = new URL(process.env.OIDC_ISSUER!)
+      const as = await oauth2.processDiscoveryResponse(issuer, await oauth2.discoveryRequest(issuer))
+      return { ...as, scopes_supported: as.scopes_supported ?? (process.env.OIDC_SCOPES ?? 'openid').split(' ') }
+    })()
+    c.set('oidcAuthorizationServer', await discovered)
+  }
+  await next()
 }
 
 declare module 'hono' {

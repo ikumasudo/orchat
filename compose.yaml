@@ -15,5 +15,15 @@ services:
       DATABASE_URL: postgres://orchat:orchat@db:5432/orchat
     ports: ["3000:3000"]
     depends_on: [db]
+  # ローカル開発用の OIDC モック (Entra ID の代わり)。docker compose --profile dev up -d
+  # issuer: https://localhost:18443/entra  ログイン画面で任意のユーザー名を入力 (= sub)。claims 欄で email 等を上書き可
+  mock-oidc:
+    profiles: [dev]
+    image: ghcr.io/navikt/mock-oauth2-server:latest
+    environment:
+      SERVER_PORT: 8443
+      JSON_CONFIG_PATH: /config/config.json
+    volumes: [./dev/mock-oidc:/config:ro]
+    ports: ["18443:8443"]
 volumes:
   pgdata:

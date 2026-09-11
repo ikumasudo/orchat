@@ -2,3 +2,5 @@ node_modules
 dist
 .env
 test/fixtures/*.jsonl
+dev/mock-oidc/*.pem
+dev/mock-oidc/*.p12

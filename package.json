@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k \"tsx watch src/server/index.ts\" \"vite\"",
+    "dev": "concurrently -k \"NODE_EXTRA_CA_CERTS=dev/mock-oidc/cert.pem tsx watch src/server/index.ts\" \"vite\"",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist/server/server/index.js",
     "db:generate": "drizzle-kit generate",
@@ -21,6 +21,7 @@
     "@tanstack/react-router": "^1.170.35",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.7",
+    "oauth4webapi": "3.8.8",
     "postgres": "^3.4.9",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

@@ -1,0 +1,16 @@
+{
+  "interactiveLogin": true,
+  "httpServer": {
+    "type": "NettyWrapper",
+    "ssl": { "keystoreFile": "/config/keystore.p12", "keystorePassword": "changeit", "keyPassword": "changeit", "keystoreType": "PKCS12" }
+  },
+  "tokenCallbacks": [
+    {
+      "issuerId": "entra",
+      "tokenExpiry": 3600,
+      "requestMappings": [
+        { "requestParam": "scope", "match": "*", "claims": { "name": "Mock User", "preferred_username": "mock.user@example.com" } }
+      ]
+    }
+  ]
+}

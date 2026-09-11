@@ -20,6 +20,19 @@ pnpm check                # tsc + tests
 pnpm spike                # OpenRouter の生ストリームを test/fixtures に保存 (仕様確認用)
 ```
 
+### Entra ID の代わりにローカル mock IdP でログインを試す
+
+```sh
+./dev/mock-oidc/gen-cert.sh                       # 自己署名証明書 (oidc-auth は issuer に https を要求する)
+docker compose --profile dev up -d mock-oidc      # https://localhost:18443/entra
+# .env: DEV_USER= (空) / OIDC_ISSUER=https://localhost:18443/entra / OIDC_CLIENT_ID=orchat / OIDC_CLIENT_SECRET=mock-secret
+#       OIDC_AUTH_EXTERNAL_URL=http://localhost:5173 / OIDC_REDIRECT_URI=http://localhost:5173/callback
+pnpm dev                                          # dev script が NODE_EXTRA_CA_CERTS=dev/mock-oidc/cert.pem を渡す
+```
+
+ブラウザで証明書警告を許可 → mock のログイン画面で任意のユーザー名 (= `sub`) と claims JSON (`{"email":"...","name":"..."}`) を入力。
+[navikt/mock-oauth2-server](https://github.com/navikt/mock-oauth2-server) を使用。設定は `dev/mock-oidc/config.json`。
+
 スキーマ変更: `src/server/db/schema.ts` を編集 → `pnpm db:generate`。migration はサーバー起動時に自動適用。
 
 ## 本番

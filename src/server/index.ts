@@ -7,7 +7,7 @@ import { RPCHandler } from '@orpc/server/fetch'
 import { onError } from '@orpc/server'
 import { and, eq } from 'drizzle-orm'
 import { db, schema, migrateDb } from './db/index.js'
-import { claimsHook, requireUser } from './auth.js'
+import { claimsHook, oidcServer, requireUser } from './auth.js'
 import { router } from './router.js'
 
 await migrateDb()
@@ -17,10 +17,12 @@ app.use('*', async (c, next) => {
   c.set('oidcClaimsHook', claimsHook)
   await next()
 })
+app.use('*', oidcServer)
 
 // 認証: /login で IdP へ、/callback で戻り、/rpc は未ログインなら 401 (クライアントが /login へ飛ばす)
 app.get('/logout', async (c) => {
-  await revokeSession(c)
+  // cookie 削除は revokeSession の冒頭で行われる。IdP 側の revocation が失敗しても (mock IdP 等) ログアウト自体は成立させる
+  await revokeSession(c).catch((e) => console.warn('token revocation failed:', e instanceof Error ? e.message : e))
   return c.redirect('/')
 })
 app.get('/callback', (c) => processOAuthCallback(c))
