@@ -31,5 +31,6 @@ test('deepestLeaf follows newest child', () => {
 })
 
 test('pathToRoot returns [] for an empty tree', () => {
+  // 空配列でも例外を投げずに空の経路を返す
   assert.deepEqual(pathToRoot([], 'x'), [])
 })
