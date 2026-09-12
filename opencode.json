@@ -1,6 +1,15 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "opencode-go/muse-spark-1.3-contributor",
+  "provider": {
+    "opencode-go": {
+      "models": {
+        "muse-spark-1.3-contributor": {
+          "options": { "reasoningEffort": "xhigh" }
+        }
+      }
+    }
+  },
   "permission": "allow",
   "plugin": ["@dietrichgebert/ponytail@4.9.0"]
 }
