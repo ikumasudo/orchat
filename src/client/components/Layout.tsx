@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChartNoAxesColumnIcon, LogOutIcon, MoreHorizontalIcon, SquarePenIcon, Trash2Icon } from 'lucide-react'
@@ -21,6 +21,7 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 
 type Conv = { id: string; title: string; updatedAt: Date }
@@ -42,17 +43,27 @@ export function Layout({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const params = useParams({ strict: false }) as { id?: string }
   const me = useQuery(orpc.me.queryOptions())
-  const convs = useQuery(orpc.conversations.list.queryOptions())
+  const [q, setQ] = useState('')
+  const [debounced, setDebounced] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(q.trim()), 300)
+    return () => clearTimeout(t)
+  }, [q])
+  const searching = debounced !== ''
+  const listRes = useQuery(orpc.conversations.list.queryOptions())
+  const searchRes = useQuery({ ...orpc.conversations.search.queryOptions({ input: { q: debounced } }), enabled: searching })
+  const convs = searching ? searchRes : listRes
   const del = useMutation(
     orpc.conversations.delete.mutationOptions({
       onSuccess: (_, { id }) => {
         qc.invalidateQueries({ queryKey: orpc.conversations.list.key() })
+        qc.invalidateQueries({ queryKey: orpc.conversations.search.key() })
         if (params.id === id) navigate({ to: '/' })
       },
     }),
   )
   const groups = Object.entries(Object.groupBy((convs.data ?? []) as Conv[], (c) => bucket(c.updatedAt)))
-  const current = convs.data?.find((c) => c.id === params.id)
+  const current = listRes.data?.find((c) => c.id === params.id)
   const title = pathname === '/usage' ? '利用状況' : current ? current.title || '無題のチャット' : '新しいチャット'
 
   return (
@@ -72,6 +83,7 @@ export function Layout({ children }: { children: ReactNode }) {
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="チャットを検索" aria-label="チャットを検索" />
         </SidebarHeader>
         <SidebarContent>
           {groups.map(([label, list]) => (
@@ -105,7 +117,7 @@ export function Layout({ children }: { children: ReactNode }) {
               </SidebarGroupContent>
             </SidebarGroup>
           ))}
-          {convs.isSuccess && !convs.data.length && <p className="px-4 py-6 text-xs text-muted-foreground">まだチャットはありません。</p>}
+          {convs.isSuccess && !convs.data.length && !searching && <p className="px-4 py-6 text-xs text-muted-foreground">まだチャットはありません。</p>}
         </SidebarContent>
         <SidebarFooter>
           <SidebarMenu>
