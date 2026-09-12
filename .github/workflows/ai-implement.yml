@@ -22,8 +22,7 @@ jobs:
       || github.event.label.name == 'ai-implement'
       || (startsWith(github.event.comment.body, '/ai')
           && github.event.comment.user.type != 'Bot'
-          && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
-          && (github.event.issue.pull_request || github.event.pull_request))
+          && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -36,16 +35,21 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Resolve target # sets MODE / N (issue) / PR / BRANCH / REF for the steps below
+      - name: Resolve target # sets MODE (new | followup | plan) / N (issue) / PR / BRANCH / REF for the steps below
         env:
           COMMENT_ID: ${{ github.event.comment.id }}
+          IS_PR: ${{ (github.event.issue.pull_request || github.event.pull_request) && 'yes' || '' }}
           REACT: ${{ github.event_name == 'issue_comment' && 'issues' || 'pulls' }}
           PR: ${{ github.event.issue.number || github.event.pull_request.number }}
           N: ${{ github.event.issue.number || inputs.issue }}
         run: |
           if [ -n "$COMMENT_ID" ]; then
-            BRANCH=$(gh pr view "$PR" --json headRefName -q .headRefName)
             gh api "repos/$GH_REPO/$REACT/comments/$COMMENT_ID/reactions" -f content=eyes --silent # ack: the run takes minutes
+          fi
+          if [ -n "$COMMENT_ID" ] && [ -z "$IS_PR" ]; then # `/ai` on a plain issue: write/revise the plan in the issue body, no code
+            printf 'MODE=plan\nN=%s\nPR=\nBRANCH=\nREF=%s\n' "$N" "$GITHUB_REF" >> "$GITHUB_ENV"
+          elif [ -n "$COMMENT_ID" ]; then
+            BRANCH=$(gh pr view "$PR" --json headRefName -q .headRefName)
             case "$BRANCH" in ai/issue-*) N=${BRANCH#ai/issue-};; *) N=;; esac # hand-made PR: no issue context
             printf 'MODE=followup\nN=%s\nPR=%s\nBRANCH=%s\nREF=refs/heads/%s\n' "$N" "$PR" "$BRANCH" "$BRANCH" >> "$GITHUB_ENV"
           else
@@ -68,22 +72,35 @@ jobs:
           C_HUNK: ${{ github.event.comment.diff_hunk }}
         run: |
           {
-            if [ "$MODE" = new ]; then
-              echo "Implement the GitHub issue below in this repository."
+            if [ "$MODE" = plan ]; then
+              echo "Write an implementation plan for the GitHub issue below. Do NOT change any file in the repository other than PLAN.md; do not touch git."
+              echo "Read AGENTS.md first, then actually read the code the issue touches (do not guess from file names)."
+              echo "Write the plan to \`/work/PLAN.md\` (Markdown, same language as the issue, no top-level \`## Plan\` heading) with these sections:"
+              echo "approach, files to change (path + one line each), acceptance criteria, open questions for the human (empty if none)."
+              echo "Keep it as short as possible: the smallest change that fully resolves the issue, no speculative work."
+              echo "If the issue already has a \`## Plan\` section, treat it as the previous version and rewrite it applying the request below and the thread."
+              echo "Tools: \`websearch\` / \`webfetch\` are available for docs and APIs."
+              echo
+              echo "# Request by @$C_USER"
+              printf '%s\n\n' "$(R=${C_BODY#/ai}; [ -n "${R// /}" ] && echo "$R" || echo "(none: write the initial plan)")"
             else
-              echo "Address the review comment below on the open pull request #$PR in this repository."
-              echo "The branch already contains the previous implementation; change only what the comment asks."
+              if [ "$MODE" = new ]; then
+                echo "Implement the GitHub issue below in this repository. If the issue has a \`## Plan\` section, follow it."
+              else
+                echo "Address the review comment below on the open pull request #$PR in this repository."
+                echo "The branch already contains the previous implementation; change only what the comment asks."
+              fi
+              echo "Rules: read AGENTS.md first. Make the smallest change that fully resolves the request."
+              echo "Run \`pnpm check\` and fix errors until it passes. Do not commit; do not touch git."
+              echo "Do not edit .env*, dev/, drizzle/, Dockerfile, compose.yaml, .github/, opencode.json."
+              echo "Do not add dependencies unless explicitly asked. Keep the diff minimal; no drive-by refactors."
+              echo "pnpm's 'Ignored build scripts' warning is expected: do not run approve-builds or create pnpm-workspace.yaml."
+              echo "Tools: \`websearch\` / \`webfetch\` are available for docs and APIs."
+              echo "To verify UI changes in a real browser: \`pnpm dev > /tmp/dev.log 2>&1 &\`, wait until http://localhost:5174 responds,"
+              echo "run \`agent-browser skills get core\` once to learn the CLI, then \`agent-browser open http://localhost:5174\` (Postgres is running; you are logged in automatically as DEV_USER)."
+              echo "Before finishing: \`agent-browser close --all\` and stop the dev server (\`pkill -f '[c]oncurrently'\`)."
+              echo
             fi
-            echo "Rules: read AGENTS.md first. Make the smallest change that fully resolves the request."
-            echo "Run \`pnpm check\` and fix errors until it passes. Do not commit; do not touch git."
-            echo "Do not edit .env*, dev/, drizzle/, Dockerfile, compose.yaml, .github/, opencode.json."
-            echo "Do not add dependencies unless explicitly asked. Keep the diff minimal; no drive-by refactors."
-            echo "pnpm's 'Ignored build scripts' warning is expected: do not run approve-builds or create pnpm-workspace.yaml."
-            echo "Tools: \`websearch\` / \`webfetch\` are available for docs and APIs."
-            echo "To verify UI changes in a real browser: \`pnpm dev > /tmp/dev.log 2>&1 &\`, wait until http://localhost:5174 responds,"
-            echo "run \`agent-browser skills get core\` once to learn the CLI, then \`agent-browser open http://localhost:5174\` (Postgres is running; you are logged in automatically as DEV_USER)."
-            echo "Before finishing: \`agent-browser close --all\` and stop the dev server (\`pkill -f '[c]oncurrently'\`)."
-            echo
             if [ "$MODE" = followup ]; then
               echo "# Review comment by @$C_USER"
               if [ -n "$C_PATH" ]; then printf 'File: %s (line %s)\n\n```diff\n%s\n```\n\n' "$C_PATH" "$C_LINE" "$C_HUNK"; fi
@@ -96,6 +113,10 @@ jobs:
               printf '\n```\n\n'
             fi
             if [ -n "$N" ]; then gh issue view "$N" --json title,body -q '"# Issue #'"$N"': " + .title + "\n\n" + .body'; fi
+            if [ "$MODE" = plan ]; then # the thread holds the human's answers to earlier open questions
+              printf '\n# Issue thread (oldest first)\n\n'
+              gh api "repos/$GH_REPO/issues/$N/comments" -q '.[] | "## @" + .user.login + " (" + .created_at + ")\n\n" + .body + "\n"' | head -c 30000
+            fi
           } > /tmp/prompt.md
           {
             echo "DATABASE_URL=postgres://orchat:orchat@localhost:5432/orchat"
@@ -116,7 +137,18 @@ jobs:
             bash -c 'export PATH=/tmp/npm/bin:$PATH AGENT_BROWSER_EXECUTABLE_PATH=$(ls /ms-playwright/chromium-*/chrome-linux*/chrome | head -1) \
               && npm i -g pnpm@10 opencode-ai@1.18.30 agent-browser@0.37.1 >/dev/null \
               && pnpm install --frozen-lockfile >/dev/null && opencode run < /prompt.md' | tee /tmp/agent.log # stdin, not argv: `pkill -f <word in prompt>` would kill this shell
+      - name: Write the plan into the issue body (plan) # everything above the `## Plan` heading is the human's text and is kept
+        if: env.MODE == 'plan'
+        run: |
+          RUN="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          [ -s PLAN.md ] || { gh issue comment "$N" -b "ai-implement: agent produced no plan (PLAN.md missing). Run: $RUN"; exit 1; }
+          gh issue view "$N" --json body -q .body | tr -d '\r' | awk '/^## Plan[[:space:]]*$/{exit} {print}' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > /tmp/body.md # drop the previous plan and trailing blank lines
+          { printf '\n## Plan\n\n'; sed '/^## Plan[[:space:]]*$/d' PLAN.md; } >> /tmp/body.md
+          gh issue edit "$N" --body-file /tmp/body.md
+          gh issue comment "$N" -b "ai-implement: plan written to the issue body under \`## Plan\` (keep your own text above that heading). Run: $RUN
+          Reply \`/ai <feedback>\` to revise it, or add the \`ai-implement\` label to implement it."
       - name: Enforce off-limits paths, bail if no changes
+        if: env.MODE != 'plan'
         run: |
           rm -rf node_modules pnpm-workspace.yaml
           git checkout -- .github AGENTS.md CLAUDE.md opencode.json && git clean -fd .github
@@ -128,6 +160,7 @@ jobs:
             exit 1
           fi
       - name: Commit, then merge main if it merges cleanly # main may have moved while the agent ran (up to 45 min)
+        if: env.MODE != 'plan'
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -138,14 +171,18 @@ jobs:
           git merge --no-ff -m "Merge main into $BRANCH" FETCH_HEAD \
             || { git merge --abort; echo "CONFLICT=1" >> "$GITHUB_ENV"; } # nobody left to resolve it: ship as-is, ask for /ai
       - uses: pnpm/action-setup@v4
+        if: env.MODE != 'plan'
         with: { version: 10 }
       - uses: actions/setup-node@v4
+        if: env.MODE != 'plan'
         with: { node-version: 24, cache: pnpm }
       - name: Gate
+        if: env.MODE != 'plan'
         id: gate
         continue-on-error: true
         run: pnpm install --frozen-lockfile && pnpm check
       - name: Push branch, then open draft PR or report on the existing one
+        if: env.MODE != 'plan'
         env:
           STATUS: ${{ steps.gate.outcome == 'success' && 'passed' || 'FAILED' }}
           C_URL: ${{ github.event.comment.html_url }}
