@@ -61,8 +61,8 @@ jobs:
             -v "$PWD:/work" -v /tmp/prompt.md:/prompt.md:ro -v /tmp/agent.env:/work/.env:ro -w /work \
             mcr.microsoft.com/playwright:v1.63.0-noble \
             bash -c 'export PATH=/tmp/npm/bin:$PATH AGENT_BROWSER_EXECUTABLE_PATH=$(ls /ms-playwright/chromium-*/chrome-linux*/chrome | head -1) \
-              && npm i -g pnpm@10 opencode-ai@1.18.30 agent-browser@0.37.1 \
-              && pnpm install --frozen-lockfile && opencode run < /prompt.md' | tee /tmp/agent.log # stdin, not argv: `pkill -f <word in prompt>` would kill this shell
+              && npm i -g pnpm@10 opencode-ai@1.18.30 agent-browser@0.37.1 >/dev/null \
+              && pnpm install --frozen-lockfile >/dev/null && opencode run < /prompt.md' | tee /tmp/agent.log # stdin, not argv: `pkill -f <word in prompt>` would kill this shell
       - name: Enforce off-limits paths, bail if no changes
         run: |
           rm -rf node_modules pnpm-workspace.yaml
