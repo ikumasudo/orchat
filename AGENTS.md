@@ -7,3 +7,4 @@
 - shadcn components live in `src/client/components/ui/`; use them instead of hand-rolling. `cn()` is in `src/client/lib/utils.ts`.
 - Tests: `test/*.test.ts`, node:test + `node:assert/strict`, pure unit tests, no DB/network. Add a test when you change logic in `src/shared` or `src/server`.
 - `dev/mock-oidc/*.pem|*.p12` and `.env` are local secrets; never commit them.
+- 開発者はこの環境に Tailscale 経由で接続している。ブラウザ確認は localhost ではなく Tailscale の URL で行う。
