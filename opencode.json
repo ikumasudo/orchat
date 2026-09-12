@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "opencode-go/muse-spark-1.3-contributor",
-  "permission": "allow"
+  "permission": "allow",
+  "plugin": ["@dietrichgebert/ponytail@4.9.0"]
 }

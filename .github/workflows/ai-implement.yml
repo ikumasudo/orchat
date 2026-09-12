@@ -16,6 +16,12 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'ai-implement'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres: # the agent starts `pnpm dev` inside its container and checks the UI with agent-browser
+        image: postgres:17-alpine
+        env: { POSTGRES_USER: orchat, POSTGRES_PASSWORD: orchat, POSTGRES_DB: orchat }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       GH_TOKEN: ${{ github.token }}
       N: ${{ github.event.issue.number || inputs.issue }}
@@ -31,16 +37,31 @@ jobs:
             echo "Do not edit .env*, dev/, drizzle/, Dockerfile, compose.yaml, .github/, opencode.json."
             echo "Do not add dependencies unless the issue explicitly asks. Keep the diff minimal; no drive-by refactors."
             echo "pnpm's 'Ignored build scripts' warning is expected: do not run approve-builds or create pnpm-workspace.yaml."
+            echo "Tools: \`websearch\` / \`webfetch\` are available for docs and APIs."
+            echo "To verify UI changes in a real browser: \`pnpm dev > /tmp/dev.log 2>&1 &\`, wait until http://localhost:5174 responds,"
+            echo "run \`agent-browser skills get core\` once to learn the CLI, then \`agent-browser open http://localhost:5174\` (Postgres is running; you are logged in automatically as DEV_USER)."
+            echo "Before finishing: \`agent-browser close --all\` and stop the dev server (\`pkill -f concurrently\`)."
             echo
             gh issue view "$N" --json title,body -q '"# Issue #'"$N"': " + .title + "\n\n" + .body'
           } > /tmp/prompt.md
+          {
+            echo "DATABASE_URL=postgres://orchat:orchat@localhost:5432/orchat"
+            echo "DEV_USER=ai-agent@example.com"
+            echo "BASE_URL=http://localhost:5174"
+            echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}"
+          } > /tmp/agent.env
       - name: Run agent in container (no GITHUB_TOKEN, no docker socket)
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: |
-          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_store_dir=/tmp/pnpm-store -e OPENCODE_API_KEY \
-            -v "$PWD:/work" -v /tmp/prompt.md:/prompt.md:ro -w /work node:24 \
-            bash -c 'npx -y pnpm@10 install --frozen-lockfile && npx -y opencode-ai@1.18.30 run "$(cat /prompt.md)"'
+          # playwright image = node 24 + chromium + its system libs; --network host reaches the postgres service
+          docker run --rm --init --ipc=host --network host --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp -e npm_config_prefix=/tmp/npm -e npm_config_store_dir=/tmp/pnpm-store -e OPENCODE_API_KEY \
+            -v "$PWD:/work" -v /tmp/prompt.md:/prompt.md:ro -v /tmp/agent.env:/work/.env:ro -w /work \
+            mcr.microsoft.com/playwright:v1.63.0-noble \
+            bash -c 'export PATH=/tmp/npm/bin:$PATH AGENT_BROWSER_EXECUTABLE_PATH=$(ls /ms-playwright/chromium-*/chrome-linux*/chrome | head -1) \
+              && npm i -g pnpm@10 opencode-ai@1.18.30 agent-browser@0.37.1 \
+              && pnpm install --frozen-lockfile && opencode run "$(cat /prompt.md)"'
       - name: Enforce off-limits paths, bail if no changes
         run: |
           rm -rf node_modules pnpm-workspace.yaml
