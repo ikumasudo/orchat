@@ -63,7 +63,7 @@ export function Layout({ children }: { children: ReactNode }) {
     }),
   )
   const groups = Object.entries(Object.groupBy((convs.data ?? []) as Conv[], (c) => bucket(c.updatedAt)))
-  const current = convs.data?.find((c) => c.id === params.id)
+  const current = listRes.data?.find((c) => c.id === params.id)
   const title = pathname === '/usage' ? '利用状況' : current ? current.title || '無題のチャット' : '新しいチャット'
 
   return (
