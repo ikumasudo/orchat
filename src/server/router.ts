@@ -3,10 +3,11 @@ import { z } from 'zod'
 import { and, desc, eq, sql, gte, lt } from 'drizzle-orm'
 import { db, schema } from './db/index.js'
 import type { User } from './auth.js'
-import { chatSettings, serverTools, userPart, type AssistantBody, type DbMessage, type Item, type StreamEvent, type UserBody, type UserPart } from '../shared/types.js'
+import { chatSettings, serverTools, userPart, type AssistantBody, type ChatSettings, type DbMessage, type Item, type ResponseEvent, type UserBody, type UserPart } from '../shared/types.js'
 import { listModels, responsesStream } from './openrouter.js'
 import { applyEvent, initialState } from '../shared/responses.js'
 import { deepestLeaf, pathToRoot, siblings } from './tree.js'
+import { createRun, runs, type Run } from './runs.js'
 
 const base = os.$context<{ user: User }>()
 const { conversations, messages, attachments, users } = schema
@@ -32,7 +33,8 @@ const conversationsRouter = {
   get: base.input(z.object({ id: z.uuid() })).handler(async ({ context, input }) => {
     const conversation = await ownConversation(context.user.id, input.id)
     const rows = (await db.query.messages.findMany({ where: eq(messages.conversationId, input.id) })) as DbMessage[]
-    return { conversation, path: pathToRoot(rows, conversation.leafId), siblings: siblings(rows) }
+    const run = runs.get(input.id)
+    return { conversation, path: pathToRoot(rows, conversation.leafId), siblings: siblings(rows), active: run ? { parentId: run.parentId } : null }
   }),
   create: base.input(z.object({ settings: chatSettings })).handler(async ({ context, input }) => {
     const [conv] = await db.insert(conversations).values({ userId: context.user.id, settings: input.settings }).returning()
@@ -85,7 +87,42 @@ async function resolveAttachments(userId: string, items: Item[]): Promise<Item[]
 
 const textOf = (content: UserPart[]) => content.filter((p) => p.type === 'input_text').map((p) => p.text).join('\n')
 
+// 生成本体。リクエストとは独立に走り、終わったら保存する
+async function generate(conversationId: string, parentId: string | null, run: Run<ResponseEvent>, body: Record<string, unknown>, s: ChatSettings) {
+  const state = initialState()
+  let error: string | undefined
+  try {
+    for await (const event of responsesStream(body, run.abort.signal)) {
+      applyEvent(state, event)
+      run.push(event)
+    }
+  } catch (e) {
+    // 途中エラー / 停止でも生成済み部分は保存する
+    error = run.abort.signal.aborted ? '停止しました' : e instanceof Error ? e.message : String(e)
+  }
+  try {
+    // 何も生成されずに失敗したときは assistant を保存しない (次ターンの履歴に空メッセージが混ざるのを防ぐ)
+    const output = state.output.filter(Boolean)
+    if (!error || output.length) {
+      const assistant: AssistantBody = error ? { output, error } : { output }
+      const cost = typeof state.usage?.cost === 'number' ? String(state.usage.cost) : null
+      const [saved] = await db
+        .insert(messages)
+        .values({ conversationId, parentId, role: 'assistant', body: assistant, model: state.model ?? s.model, usage: state.usage, cost, generationId: state.id })
+        .returning()
+      await db.update(conversations).set({ leafId: saved.id, updatedAt: new Date() }).where(eq(conversations.id, conversationId))
+    }
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e)
+  } finally {
+    if (error) console.error(`generate ${conversationId}: ${error}`)
+    runs.delete(conversationId)
+    run.end(error)
+  }
+}
+
 const messagesRouter = {
+  // 生成を開始して即返す。イベントは stream で受け取る (切断しても生成は続く)
   send: base
     .input(
       z.object({
@@ -96,17 +133,18 @@ const messagesRouter = {
         settings: chatSettings,
       }),
     )
-    .handler(async function* ({ context, input, signal }): AsyncGenerator<StreamEvent> {
+    .handler(async ({ context, input }) => {
       const conv = await ownConversation(context.user.id, input.conversationId)
+      if (runs.has(conv.id)) throw new ORPCError('CONFLICT', { message: '応答を生成中です' })
       let parentId = input.parentId
+      let userMsg: DbMessage | undefined
 
       if (input.content) {
         const body: UserBody = { type: 'message', role: 'user', content: input.content }
-        const [userMsg] = await db.insert(messages).values({ conversationId: conv.id, parentId, role: 'user', body }).returning()
+        ;[userMsg] = (await db.insert(messages).values({ conversationId: conv.id, parentId, role: 'user', body }).returning()) as DbMessage[]
         parentId = userMsg.id
         const title = conv.title || textOf(input.content).slice(0, 50)
         await db.update(conversations).set({ leafId: userMsg.id, title, settings: input.settings, updatedAt: new Date() }).where(eq(conversations.id, conv.id))
-        yield { type: 'user', message: userMsg as DbMessage }
       }
 
       // 履歴 = user message item + assistant の output items をそのまま並べる (reasoning / server tool の item も含めて返送する)
@@ -126,32 +164,23 @@ const messagesRouter = {
         ...(tools.length && { tools }),
       }
 
-      const state = initialState()
-      let error: string | undefined
-      try {
-        for await (const event of responsesStream(body, signal)) {
-          applyEvent(state, event)
-          yield { type: 'event', event }
-        }
-      } catch (e) {
-        // 途中エラー / abort でも生成済み部分は保存する
-        error = e instanceof Error ? e.message : String(e)
-      }
-
-      // 何も生成されずに失敗したときは assistant を保存しない (次ターンの履歴に空メッセージが混ざるのを防ぐ)
-      const output = state.output.filter(Boolean)
-      if (error && !output.length) throw new ORPCError('BAD_GATEWAY', { message: error })
-
-      const assistant: AssistantBody = error ? { output, error } : { output }
-      const cost = typeof state.usage?.cost === 'number' ? String(state.usage.cost) : null
-      const [saved] = await db
-        .insert(messages)
-        .values({ conversationId: conv.id, parentId, role: 'assistant', body: assistant, model: state.model ?? s.model, usage: state.usage, cost, generationId: state.id })
-        .returning()
-      await db.update(conversations).set({ leafId: saved.id, updatedAt: new Date() }).where(eq(conversations.id, conv.id))
-      yield { type: 'done', message: saved as DbMessage }
-      if (error && !signal?.aborted) throw new ORPCError('BAD_GATEWAY', { message: error })
+      const run = createRun<ResponseEvent>(parentId)
+      runs.set(conv.id, run)
+      void generate(conv.id, parentId, run, body, s)
+      return { parentId, message: userMsg }
     }),
+  // 進行中の生成に接続する。バッファ済みイベントを再生してから live を流し、終わったら閉じる
+  stream: base.input(z.object({ conversationId: z.uuid() })).handler(async function* ({ context, input, signal }): AsyncGenerator<ResponseEvent> {
+    await ownConversation(context.user.id, input.conversationId)
+    const run = runs.get(input.conversationId) as Run<ResponseEvent> | undefined
+    if (!run) return
+    yield* run.subscribe(signal)
+    if (run.error && !run.abort.signal.aborted) throw new ORPCError('BAD_GATEWAY', { message: run.error })
+  }),
+  stop: base.input(z.object({ conversationId: z.uuid() })).handler(async ({ context, input }) => {
+    await ownConversation(context.user.id, input.conversationId)
+    runs.get(input.conversationId)?.abort.abort()
+  }),
 }
 
 const attachmentsRouter = {

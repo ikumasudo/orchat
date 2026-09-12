@@ -7,7 +7,7 @@ OpenRouter 前提の社内チャット。OpenRouter **Responses API** (`/api/v1/
 - assistant の応答は output items (reasoning → tool → message …) の配列として保存し、履歴にそのまま並べて送る
 - ブランチ (編集・再生成)、画像/PDF 添付、メッセージ単位のコスト記録、Entra ID (OIDC) SSO
 
-Hono + oRPC + Drizzle/Postgres / React + Vite + TanStack Router/Query。1 コンテナ。
+Hono + oRPC + Drizzle/Postgres / React + Vite + TanStack Router/Query。UI は Tailwind v4 + shadcn/ui + [AI Elements](https://elements.ai-sdk.dev/) (`src/client/components/{ui,ai-elements}` は CLI で取り込んだコピー。`pnpm dlx shadcn@latest add …` で追加)。1 コンテナ。
 
 ## 開発
 
@@ -15,7 +15,7 @@ Hono + oRPC + Drizzle/Postgres / React + Vite + TanStack Router/Query。1 コン
 cp .env.example .env      # OPENROUTER_API_KEY, DEV_USER=you@example.com を設定 (DEV_USER で OIDC をスキップ)
 docker compose up -d db
 pnpm install
-pnpm dev                  # API :3000 (PORT で変更可), Web :5173
+pnpm dev                  # API :3000 (PORT で変更可), Web :5174
 pnpm check                # tsc + tests
 pnpm spike                # OpenRouter の生ストリームを test/fixtures に保存 (仕様確認用)
 ```

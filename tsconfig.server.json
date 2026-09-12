@@ -8,7 +8,7 @@
     "outDir": "dist/server",
     "rootDir": "src",
     "types": ["node"],
-    "lib": ["ES2022", "DOM"]
+    "lib": ["ES2024", "DOM"]
   },
   "include": ["src/server", "src/shared"]
 }

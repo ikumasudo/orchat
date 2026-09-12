@@ -1,7 +1,19 @@
-import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { useState } from 'react'
+import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, FileTextIcon, PencilIcon, RefreshCwIcon } from 'lucide-react'
 import type { Annotation, AssistantBody, DbMessage, Item, UserBody, UserPart } from '../../shared/types.js'
 import { isToolItem } from '../../shared/responses.js'
+import {
+  Message as AiMessage,
+  MessageAction,
+  MessageActions,
+  MessageAttachment,
+  MessageAttachments,
+  MessageContent,
+  MessageResponse,
+} from '@/components/ai-elements/message'
+import { Source, Sources, SourcesContent, SourcesTrigger } from '@/components/ai-elements/sources'
+import { Loader } from '@/components/ai-elements/loader'
+import { Badge } from '@/components/ui/badge'
 import { Reasoning } from './Reasoning.js'
 import { ToolItem } from './ToolItem.js'
 
@@ -16,26 +28,62 @@ type Props = {
 
 export function Message({ message: m, siblings = [], streaming, onRegenerate, onEdit, onSwitch }: Props) {
   const idx = siblings.indexOf(m.id)
+  const isUser = m.role === 'user'
+  const text = isUser ? '' : assistantText(m.body as AssistantBody)
   return (
-    <article className={`msg ${m.role}`}>
-      {m.role === 'user' ? <UserContent content={(m.body as UserBody).content} /> : <AssistantContent body={m.body as AssistantBody} streaming={streaming} />}
-      <footer className="msg-footer">
-        {siblings.length > 1 && onSwitch && (
-          <span className="branches">
-            <button className="icon" disabled={idx <= 0} onClick={() => onSwitch(siblings[idx - 1])}>‹</button>
-            {idx + 1}/{siblings.length}
-            <button className="icon" disabled={idx >= siblings.length - 1} onClick={() => onSwitch(siblings[idx + 1])}>›</button>
-          </span>
-        )}
-        {m.role === 'user' && onEdit && <button className="link" onClick={onEdit}>編集</button>}
-        {m.role === 'assistant' && !streaming && onRegenerate && <button className="link" onClick={onRegenerate}>再生成</button>}
-        {m.model && <span className="muted">{m.model}</span>}
-        {m.cost != null && <span className="muted">${Number(m.cost).toFixed(5)}</span>}
-        {m.usage && <span className="muted">{tokens(m.usage)}</span>}
-      </footer>
-    </article>
+    <AiMessage from={isUser ? 'user' : 'assistant'} className={isUser ? 'max-w-[85%]' : 'max-w-full'}>
+      {isUser ? <UserContent content={(m.body as UserBody).content} /> : <AssistantContent body={m.body as AssistantBody} streaming={streaming} />}
+      {!streaming && (
+        <footer className={`flex min-h-7 items-center gap-1 text-muted-foreground ${isUser ? 'justify-end' : ''}`}>
+          {siblings.length > 1 && onSwitch && (
+            <span className="mr-1 inline-flex items-center font-mono text-xs tabular-nums">
+              <MessageAction tooltip="前の分岐" disabled={idx <= 0} onClick={() => onSwitch(siblings[idx - 1])}>
+                <ChevronLeftIcon />
+              </MessageAction>
+              {idx + 1}/{siblings.length}
+              <MessageAction tooltip="次の分岐" disabled={idx >= siblings.length - 1} onClick={() => onSwitch(siblings[idx + 1])}>
+                <ChevronRightIcon />
+              </MessageAction>
+            </span>
+          )}
+          <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+            {isUser && onEdit && (
+              <MessageAction tooltip="編集して送り直す" onClick={onEdit}>
+                <PencilIcon />
+              </MessageAction>
+            )}
+            {!isUser && text && <CopyAction text={text} />}
+            {!isUser && onRegenerate && (
+              <MessageAction tooltip="再生成" onClick={onRegenerate}>
+                <RefreshCwIcon />
+              </MessageAction>
+            )}
+          </MessageActions>
+          {!isUser && (m.model || m.cost != null || m.usage) && (
+            <span className="ml-2 truncate font-mono text-[11px] tabular-nums">
+              {[m.model, m.usage && tokens(m.usage), m.cost != null && `$${Number(m.cost).toFixed(5)}`].filter(Boolean).join('  ·  ')}
+            </span>
+          )}
+        </footer>
+      )}
+    </AiMessage>
   )
 }
+
+function CopyAction({ text }: { text: string }) {
+  const [done, setDone] = useState(false)
+  return (
+    <MessageAction
+      tooltip={done ? 'コピーしました' : 'コピー'}
+      onClick={() => navigator.clipboard.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) })}
+    >
+      {done ? <CheckIcon /> : <CopyIcon />}
+    </MessageAction>
+  )
+}
+
+const assistantText = (b: AssistantBody) =>
+  b.output.filter((it) => it?.type === 'message').map((it) => (it.content ?? []).map((p) => p.text ?? '').join('')).join('\n\n')
 
 function tokens(u: NonNullable<DbMessage['usage']>) {
   const r = u.output_tokens_details?.reasoning_tokens
@@ -44,18 +92,26 @@ function tokens(u: NonNullable<DbMessage['usage']>) {
 }
 
 function UserContent({ content }: { content: UserPart[] }) {
+  const files = content.filter((p) => p.type !== 'input_text')
+  const text = content.filter((p) => p.type === 'input_text').map((p) => p.text).join('\n')
   return (
-    <div className="user-content">
-      {content.map((p, i) =>
-        p.type === 'input_text' ? (
-          <p key={i}>{p.text}</p>
-        ) : p.type === 'input_image' ? (
-          <img key={i} src={attachmentUrl(p.image_url)} alt="" className="thumb" />
-        ) : (
-          <span key={i} className="chip">📄 {p.filename}</span>
-        ),
+    <>
+      {files.length > 0 && (
+        <MessageAttachments>
+          {files.map((p, i) =>
+            p.type === 'input_image' ? (
+              <MessageAttachment key={i} data={{ type: 'file', url: attachmentUrl(p.image_url), mediaType: 'image/*' }} className="size-32" />
+            ) : p.type === 'input_file' ? (
+              <Badge key={i} variant="secondary" className="max-w-60 gap-1.5 py-1">
+                <FileTextIcon className="size-3.5" />
+                <span className="truncate">{p.filename}</span>
+              </Badge>
+            ) : null,
+          )}
+        </MessageAttachments>
       )}
-    </div>
+      {text && <MessageContent className="whitespace-pre-wrap text-[15px] leading-relaxed">{text}</MessageContent>}
+    </>
   )
 }
 const attachmentUrl = (ref: string) => (ref.startsWith('attachment:') ? `/attachments/${ref.slice('attachment:'.length)}` : ref)
@@ -66,22 +122,26 @@ function AssistantContent({ body, streaming }: { body: AssistantBody; streaming?
   const citations = new Map<string, Annotation>()
   for (const it of items) for (const p of it.content ?? []) for (const a of p.annotations ?? []) if (a.type === 'url_citation' && a.url) citations.set(a.url, a)
   return (
-    <div className="assistant-content">
+    <MessageContent className="w-full text-[15px] leading-relaxed">
       {items.map((item, i) => (
         <ItemView key={item.id ?? i} item={item} streaming={streaming} />
       ))}
-      {streaming && !items.length && <span className="muted">…</span>}
-      {body.error && <div className="error">{body.error}</div>}
+      {streaming && !items.length && <Loader className="text-muted-foreground" />}
+      {body.error && <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{body.error}</p>}
       {citations.size > 0 && (
-        <ol className="citations">
-          {[...citations.values()].map((c) => (
-            <li key={c.url}>
-              <a href={c.url} target="_blank" rel="noreferrer">{c.title || c.url}</a>
-            </li>
-          ))}
-        </ol>
+        <Sources className="mb-0 mt-2">
+          <SourcesTrigger count={citations.size}>
+            <span className="font-medium">参照元 {citations.size} 件</span>
+            <ChevronDownIcon className="size-3.5" />
+          </SourcesTrigger>
+          <SourcesContent>
+            {[...citations.values()].map((c) => (
+              <Source key={c.url} href={c.url} title={c.title || c.url} />
+            ))}
+          </SourcesContent>
+        </Sources>
       )}
-    </div>
+    </MessageContent>
   )
 }
 
@@ -90,7 +150,7 @@ function ItemView({ item, streaming }: { item: Item; streaming?: boolean }) {
   if (isToolItem(item)) return <ToolItem item={item} />
   if (item.type === 'message') {
     const text = (item.content ?? []).map((p) => p.text ?? '').join('')
-    return text ? <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown> : null
+    return text ? <MessageResponse mode={streaming ? 'streaming' : 'static'}>{text}</MessageResponse> : null
   }
   return null // 未知の item type は描かない (DB には残っている)
 }

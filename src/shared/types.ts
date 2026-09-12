@@ -82,11 +82,6 @@ export type ORModel = {
   supported_parameters?: string[]
 }
 
-export type StreamEvent =
-  | { type: 'user'; message: DbMessage }
-  | { type: 'event'; event: ResponseEvent }
-  | { type: 'done'; message: DbMessage }
-
 export type DbMessage = {
   id: string
   conversationId: string
