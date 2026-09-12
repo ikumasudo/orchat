@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import { sseData } from '../src/server/openrouter.ts'
-import { applyEvent, initialState, itemText } from '../src/shared/responses.ts'
-import type { ResponseEvent } from '../src/shared/types.ts'
+import { applyEvent, initialState, itemText, splitStepsAnswer } from '../src/shared/responses.ts'
+import type { Item, ResponseEvent } from '../src/shared/types.ts'
 
 test('applyEvent builds items from added/delta/annotation events', () => {
   const s = initialState()
@@ -24,6 +24,36 @@ test('applyEvent builds items from added/delta/annotation events', () => {
   assert.equal(s.output[2].content?.[0].text, 'Hello')
   assert.equal(s.output[2].content?.[0].annotations?.length, 1)
   assert.equal(s.completed, false)
+})
+
+test('splitStepsAnswer: 末尾の連続 message が回答、それ以外がステップ', () => {
+  const msg = (text: string): Item => ({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] })
+  const rs: Item = { type: 'reasoning', status: 'completed' }
+  const tool: Item = { type: 'openrouter:web_search', status: 'completed' }
+
+  // 回答のみ → ステップなし
+  assert.deepEqual(splitStepsAnswer([msg('a'), msg('b')]), { steps: [], answer: [msg('a'), msg('b')] })
+  // 思考+ツール+回答
+  assert.deepEqual(splitStepsAnswer([rs, tool, msg('答え')]), { steps: [rs, tool], answer: [msg('答え')] })
+  // 途中 message はステップ側
+  assert.deepEqual(splitStepsAnswer([msg('検索します'), tool, msg('答え')]), { steps: [msg('検索します'), tool], answer: [msg('答え')] })
+  // 非 message のみ / 空
+  assert.deepEqual(splitStepsAnswer([rs, tool]), { steps: [rs, tool], answer: [] })
+  assert.deepEqual(splitStepsAnswer([]), { steps: [], answer: [] })
+})
+
+test('splitStepsAnswer: ストリーミング中の境界移動', () => {
+  const msg = (text: string): Item => ({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] })
+  // 回答を流している途中は回答側
+  let out = [msg('Hello')]
+  assert.deepEqual(splitStepsAnswer(out).answer, [msg('Hello')])
+  // ツール呼び出しが来たら流していたテキストはステップ側へ移る
+  const tool: Item = { type: 'openrouter:web_search', status: 'in_progress' }
+  out = [...out, tool]
+  assert.deepEqual(splitStepsAnswer(out), { steps: [msg('Hello'), tool], answer: [] })
+  // 最終回答が来たら末尾だけ回答に戻る
+  out = [...out, msg('答え')]
+  assert.deepEqual(splitStepsAnswer(out), { steps: [msg('Hello'), tool], answer: [msg('答え')] })
 })
 
 test('sseData splits events and drops comments', async () => {

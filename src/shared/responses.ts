@@ -60,3 +60,12 @@ const itemAt = (s: ResponseState, i: number) => (s.output[i] ??= { type: 'unknow
 // UI 用ヘルパー
 export const itemText = (item: Item) => [...(item.content ?? []), ...(item.summary ?? [])].map((p) => p.text ?? '').join('')
 export const isToolItem = (item: Item) => item.type.startsWith('openrouter:') || item.type.endsWith('_call')
+
+// アシスタント output を「ステップ」と「回答」に分ける。
+// 末尾に連続する message item が回答、それより前 (reasoning・ツール・途中 message) がすべてステップ。
+// ストリーミング中はこの境界が動く (回答を流している途中でツール呼び出しが来たら、そのテキストはステップ側へ移る)。
+export function splitStepsAnswer(output: Item[]): { steps: Item[]; answer: Item[] } {
+  let i = output.length
+  while (i > 0 && output[i - 1]?.type === 'message') i--
+  return { steps: output.slice(0, i), answer: output.slice(i) }
+}
