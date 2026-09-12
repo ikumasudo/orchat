@@ -29,18 +29,19 @@ type Props = {
   message: Pick<DbMessage, 'id' | 'role' | 'body'> & Partial<DbMessage>
   siblings?: string[]
   streaming?: boolean
+  conversationId?: string
   onRegenerate?: () => void
   onEdit?: () => void
   onSwitch?: (id: string) => void
 }
 
-export function Message({ message: m, siblings = [], streaming, onRegenerate, onEdit, onSwitch }: Props) {
+export function Message({ message: m, siblings = [], streaming, conversationId, onRegenerate, onEdit, onSwitch }: Props) {
   const idx = siblings.indexOf(m.id)
   const isUser = m.role === 'user'
   const text = isUser ? '' : assistantText(m.body as AssistantBody)
   return (
     <AiMessage from={isUser ? 'user' : 'assistant'} className={isUser ? 'max-w-[85%]' : 'max-w-full'}>
-      {isUser ? <UserContent content={(m.body as UserBody).content} /> : <AssistantContent body={m.body as AssistantBody} streaming={streaming} />}
+      {isUser ? <UserContent content={(m.body as UserBody).content} /> : <AssistantContent body={m.body as AssistantBody} streaming={streaming} conversationId={conversationId ?? m.conversationId} />}
       {!streaming && (
         <footer className={`flex min-h-7 items-center gap-1 text-muted-foreground ${isUser ? 'justify-end' : ''}`}>
           {siblings.length > 1 && onSwitch && (
@@ -126,16 +127,17 @@ const attachmentUrl = (ref: string) => (ref.startsWith('attachment:') ? `/attach
 
 // output を「活動ブロック (ステップ)」と「回答」に分けて描く。
 // 末尾に連続する message が回答、それより前 (reasoning・ツール・途中 message) は折りたたみ 1 つに集約する
-function AssistantContent({ body, streaming }: { body: AssistantBody; streaming?: boolean }) {
+function AssistantContent({ body, streaming, conversationId }: { body: AssistantBody; streaming?: boolean; conversationId?: string }) {
   const items = body.output.filter(Boolean)
   const { steps, answer } = splitStepsAnswer(items)
+  const outputs = new Map(items.filter((it) => it?.type === 'function_call_output').map((it) => [String(it.call_id), it]))
   const citations = new Map<string, Annotation>()
   for (const it of items) for (const p of it.content ?? []) for (const a of p.annotations ?? []) if (a.type === 'url_citation' && a.url) citations.set(a.url, a)
   return (
     <MessageContent className="w-full text-[15px] leading-relaxed">
-      {steps.length > 0 && <ActivityBlock steps={steps} streaming={streaming} />}
+      {steps.length > 0 && <ActivityBlock steps={steps} streaming={streaming} conversationId={conversationId} />}
       {answer.map((item, i) => (
-        <ItemView key={item.id ?? `a${i}`} item={item} streaming={streaming} />
+        <ItemView key={item.id ?? `a${i}`} item={item} streaming={streaming} conversationId={conversationId} outputs={outputs} />
       ))}
       {streaming && !items.length && <Loader className="text-muted-foreground" />}
       {body.error && <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{body.error}</p>}
@@ -158,9 +160,17 @@ function AssistantContent({ body, streaming }: { body: AssistantBody; streaming?
 
 // 思考・ツール利用・途中テキストを 1 つの折りたたみブロックに集約する。
 // 既定は閉じ、開くと各ステップを既存の表示 (Reasoning / ToolItem / MessageResponse) で並べる。開閉は state のみ
-function ActivityBlock({ steps, streaming }: { steps: Item[]; streaming?: boolean }) {
+function ActivityBlock({ steps, streaming, conversationId }: { steps: Item[]; streaming?: boolean; conversationId?: string }) {
   const [open, setOpen] = useState(false)
-  const active = streaming ? [...steps].reverse().find((it) => (it.type === 'reasoning' || isToolItem(it)) && it.status !== 'completed') : undefined
+  const doneCalls = new Set(steps.filter((it) => it?.type === 'function_call_output').map((it) => String(it.call_id)))
+  const outputs = new Map(steps.filter((it) => it?.type === 'function_call_output').map((it) => [String(it.call_id), it]))
+  const active = streaming
+    ? [...steps].reverse().find((it) => {
+        if (it.type === 'reasoning') return it.status !== 'completed'
+        if (it.type === 'function_call') return it.approval === 'pending' || !doneCalls.has(String(it.call_id))
+        return isToolItem(it) && it.status !== 'completed'
+      })
+    : undefined
   const seconds = useActiveSeconds(active != null)
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="mb-2 rounded-md border bg-muted/40">
@@ -171,7 +181,7 @@ function ActivityBlock({ steps, streaming }: { steps: Item[]; streaming?: boolea
       </CollapsibleTrigger>
       <CollapsibleContent className="px-3 pb-1">
         {steps.map((item, i) => (
-          <ItemView key={item.id ?? `s${i}`} item={item} streaming={streaming} />
+          <ItemView key={item.id ?? `s${i}`} item={item} streaming={streaming} conversationId={conversationId} outputs={outputs} />
         ))}
       </CollapsibleContent>
     </Collapsible>
@@ -181,6 +191,10 @@ function ActivityBlock({ steps, streaming }: { steps: Item[]; streaming?: boolea
 // ストリーミング中は閉じたまま現在進行中の 1 ステップだけを 1 行で見せる
 function ActiveStep({ item }: { item: Item }) {
   if (item.type === 'reasoning') return <Shimmer duration={1}>思考中…</Shimmer>
+  if (item.type === 'function_call') {
+    const name = typeof item.name === 'string' && item.name ? item.name : toolLabel(item)
+    return item.approval === 'pending' ? <>{name}: 承認待ち</> : <>{name}: 実行中</>
+  }
   const detail = item.action?.query ?? item.url ?? ''
   return <>{detail ? `${toolLabel(item)}: ${detail}` : `${toolLabel(item)}: 実行中`}</>
 }
@@ -223,10 +237,16 @@ function summarizeSteps(steps: Item[], seconds?: number) {
 }
 
 const toolLabel = (item: Item) =>
-  serverTools.find((t) => t.id === item.type)?.label ?? (/search/.test(item.type) ? 'Web検索' : item.type.replace(/^openrouter:/, ''))
+  item.type === 'function_call' && typeof item.name === 'string' && item.name
+    ? item.name
+    : (serverTools.find((t) => t.id === item.type)?.label ?? (/search/.test(item.type) ? 'Web検索' : item.type.replace(/^openrouter:/, '')))
 
-function ItemView({ item, streaming }: { item: Item; streaming?: boolean }) {
+function ItemView({ item, streaming, conversationId, outputs }: { item: Item; streaming?: boolean; conversationId?: string; outputs?: Map<string, Item> }) {
   if (item.type === 'reasoning') return <Reasoning item={item} streaming={streaming} />
+  if (item.type === 'function_call_output') return null // 対応する function_call 側に結果として出す
+  if (item.type === 'function_call') {
+    return <ToolItem item={item} output={outputs?.get(String(item.call_id))} streaming={streaming} conversationId={conversationId} />
+  }
   if (isToolItem(item)) return <ToolItem item={item} />
   if (item.type === 'message') {
     const text = (item.content ?? []).map((p) => p.text ?? '').join('')

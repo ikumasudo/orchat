@@ -7,6 +7,7 @@ export type Run<T> = {
   done: boolean
   error?: string
   abort: AbortController
+  pending: Map<string /*call_id*/, PromiseWithResolvers<boolean>>
   push(ev: T): void
   end(error?: string): void
   subscribe(signal?: AbortSignal): AsyncGenerator<T>
@@ -19,6 +20,7 @@ export function createRun<T>(parentId: string | null): Run<T> {
     events: [],
     done: false,
     abort: new AbortController(),
+    pending: new Map(),
     push(ev) {
       run.events.push(ev)
       wake.resolve()

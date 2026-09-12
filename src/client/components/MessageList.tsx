@@ -31,13 +31,14 @@ export function MessageList({ path, siblings, streaming, modelName, onRegenerate
               key={m.id}
               message={m}
               siblings={siblings[m.parentId ?? ''] ?? []}
+              conversationId={m.conversationId}
               onRegenerate={() => onRegenerate(m)}
               onEdit={() => onEdit(m)}
               onSwitch={onSwitch}
             />
           ))
         )}
-        {streaming && <Message message={{ id: 'streaming', role: 'assistant', body: { output: streaming.output } }} streaming />}
+        {streaming && <Message message={{ id: 'streaming', role: 'assistant', body: { output: streaming.output } }} streaming conversationId={streaming.conversationId} />}
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>

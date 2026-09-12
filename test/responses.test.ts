@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import { sseData } from '../src/server/openrouter.ts'
-import { applyEvent, initialState, itemText, splitStepsAnswer } from '../src/shared/responses.ts'
+import { applyEvent, initialState, itemText, offsetEvent, splitStepsAnswer } from '../src/shared/responses.ts'
 import type { Item, ResponseEvent } from '../src/shared/types.ts'
 
 test('applyEvent builds items from added/delta/annotation events', () => {
@@ -24,6 +24,49 @@ test('applyEvent builds items from added/delta/annotation events', () => {
   assert.equal(s.output[2].content?.[0].text, 'Hello')
   assert.equal(s.output[2].content?.[0].annotations?.length, 1)
   assert.equal(s.completed, false)
+})
+
+test('function_call_arguments.delta は無視される (完成形は output_item.done で来る)', () => {
+  const s = initialState()
+  applyEvent(s, { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call', call_id: 'c1', name: 'echo', arguments: '' } } as ResponseEvent)
+  applyEvent(s, { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"a":' } as ResponseEvent)
+  assert.deepEqual(s.output[0], { type: 'function_call', call_id: 'c1', name: 'echo', arguments: '' })
+  applyEvent(s, { type: 'response.output_item.done', output_index: 0, item: { type: 'function_call', call_id: 'c1', name: 'echo', arguments: '{"a":1}' } } as ResponseEvent)
+  assert.equal(s.output[0].arguments, '{"a":1}')
+})
+
+test('offsetEvent: 2 回目以降の index をずらし output を連結・usage を合算する', () => {
+  const prev = {
+    output: [{ type: 'function_call', call_id: 'c1', name: 'echo', arguments: '{}' }] as Item[],
+    usage: { input_tokens: 10, output_tokens: 4, cost: 0.001, output_tokens_details: { reasoning_tokens: 2 }, server_tool_use_details: { web_search_requests: 1 } },
+  }
+  // output_index のずれ
+  assert.equal(offsetEvent({ type: 'response.output_item.done', output_index: 0, item: { type: 'message' } } as ResponseEvent, 2, prev).output_index, 2)
+  // completed の連結と合算
+  const merged = offsetEvent(
+    {
+      type: 'response.completed',
+      response: {
+        id: 'resp-2',
+        model: 'm',
+        output: [{ type: 'message' }] as Item[],
+        usage: { input_tokens: 20, output_tokens: 6, cost: 0.002, output_tokens_details: { reasoning_tokens: 3 }, server_tool_use_details: { tool_calls_executed: 1 } },
+      },
+    } as ResponseEvent,
+    1,
+    prev,
+  )
+  assert.deepEqual(merged.response?.output?.map((i) => i.type), ['function_call', 'message'])
+  assert.deepEqual(merged.response?.usage, {
+    input_tokens: 30,
+    output_tokens: 10,
+    cost: 0.003,
+    output_tokens_details: { reasoning_tokens: 5 },
+    server_tool_use_details: { web_search_requests: 1, tool_calls_executed: 1 },
+  })
+  // base 0 ではイベントをそのまま返す
+  const ev = { type: 'response.output_item.done', output_index: 0, item: { type: 'message' } } as ResponseEvent
+  assert.equal(offsetEvent(ev, 0, { output: [] }), ev)
 })
 
 test('splitStepsAnswer: 末尾の連続 message が回答、それ以外がステップ', () => {

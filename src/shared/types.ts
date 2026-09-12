@@ -40,8 +40,8 @@ export type Item = {
   signature?: string
   action?: { type?: string; query?: string; sources?: Array<{ type?: string; url?: string }>; commands?: string[]; [k: string]: unknown }
   url?: string
-  // openrouter:shell の実行結果
-  output?: Array<{ stdout?: string; stderr?: string; outcome?: { type?: string; exit_code?: number } }>
+  // openrouter:shell の実行結果 / function_call_output の結果文字列
+  output?: Array<{ stdout?: string; stderr?: string; outcome?: { type?: string; exit_code?: number } }> | string
   [k: string]: unknown
 }
 

@@ -40,6 +40,9 @@ export function applyEvent(s: ResponseState, ev: ResponseEvent): ResponseState {
       s.id = ev.response?.id ?? s.id
       s.model = ev.response?.model ?? s.model
       break
+    case 'response.function_call_arguments.delta':
+      // arguments は output_item.done で完成形が来るので連結しない
+      break
     default:
       if (ev.type.endsWith('.delta') && typeof ev.delta === 'string' && i != null) {
         const item = itemAt(s, i)
@@ -56,6 +59,45 @@ export function applyEvent(s: ResponseState, ev: ResponseEvent): ResponseState {
 }
 
 const itemAt = (s: ResponseState, i: number) => (s.output[i] ??= { type: 'unknown' })
+
+// 2 回目以降のリクエストのイベントを 1 ターンの通し番号に直す純関数。
+// output_index をずらし、completed/done の output はそれまでの items に連結、usage の数値は合算する。
+// サーバーが run に push する前に通す。クライアントは applyEvent のまま畳める
+export function offsetEvent(ev: ResponseEvent, base: number, prev: { output: Item[]; usage?: Usage }): ResponseEvent {
+  const out = base === 0 ? ev : { ...ev, ...(ev.output_index != null ? { output_index: ev.output_index + base } : {}) }
+  if ((ev.type === 'response.completed' || ev.type === 'response.done') && ev.response) {
+    return { ...out, response: { ...ev.response, output: [...prev.output, ...(ev.response.output ?? [])], usage: mergeUsage(prev.usage, ev.response.usage) } }
+  }
+  return out
+}
+
+const num = (v: unknown) => (typeof v === 'number' ? v : 0)
+
+function mergeUsage(a?: Usage, b?: Usage): Usage | undefined {
+  if (!a) return b
+  if (!b) return a
+  const out: Usage = { ...a, ...b }
+  for (const k of ['input_tokens', 'output_tokens', 'cost'] as const) {
+    if (a[k] != null || b[k] != null) out[k] = num(a[k]) + num(b[k])
+  }
+  if (a.output_tokens_details || b.output_tokens_details) {
+    const r = { ...a.output_tokens_details, ...b.output_tokens_details }
+    if (a.output_tokens_details?.reasoning_tokens != null || b.output_tokens_details?.reasoning_tokens != null) {
+      r.reasoning_tokens = num(a.output_tokens_details?.reasoning_tokens) + num(b.output_tokens_details?.reasoning_tokens)
+    }
+    out.output_tokens_details = r
+  }
+  if (a.server_tool_use_details || b.server_tool_use_details) {
+    const d = { ...a.server_tool_use_details, ...b.server_tool_use_details }
+    for (const k of ['web_search_requests', 'tool_calls_executed'] as const) {
+      if (a.server_tool_use_details?.[k] != null || b.server_tool_use_details?.[k] != null) {
+        d[k] = num(a.server_tool_use_details?.[k]) + num(b.server_tool_use_details?.[k])
+      }
+    }
+    out.server_tool_use_details = d
+  }
+  return out
+}
 
 // UI 用ヘルパー
 export const itemText = (item: Item) => [...(item.content ?? []), ...(item.summary ?? [])].map((p) => p.text ?? '').join('')
