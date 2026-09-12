@@ -14,7 +14,6 @@ export function Chat({ id }: { id?: string }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const conv = useQuery({ ...orpc.conversations.get.queryOptions({ input: { id: id! } }), enabled: !!id })
-  const models = useQuery(orpc.models.list.queryOptions())
   const [settings, setSettings] = useState<ChatSettings>(loadSettings)
   const [streaming, setStreaming] = useState<Streaming | null>(null)
   const [pending, setPending] = useState<DbMessage[]>([]) // ストリーム中に追加された user message (再取得前の表示用)
@@ -100,18 +99,17 @@ export function Chat({ id }: { id?: string }) {
   // 表示は現在の会話のものだけ (別会話のストリームはバックグラウンドで続く)
   const path = [...(conv.data?.path ?? []), ...pending.filter((m) => m.conversationId === id)]
   const shown = streaming?.conversationId === id ? streaming : null
-  const modelName = models.data?.find((m) => m.id === settings.model)?.name
+  // 空の会話では挨拶と入力欄を画面中央に置く (既存会話の読み込み中は出さない)。Composer は子要素の位置を固定して再マウントさせない
+  const empty = !shown && !path.length && (!id || conv.isSuccess)
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <MessageList
-        path={path}
-        siblings={conv.data?.siblings ?? {}}
-        streaming={shown}
-        modelName={modelName}
-        onRegenerate={regenerate}
-        onEdit={edit}
-        onSwitch={switchBranch}
-      />
+      {empty ? (
+        <div className="flex flex-1 flex-col items-center justify-end px-4 pb-6 text-center">
+          <p className="max-w-md text-balance text-2xl font-medium leading-snug tracking-tight text-foreground/90">何でも聞いてください。</p>
+        </div>
+      ) : (
+        <MessageList path={path} siblings={conv.data?.siblings ?? {}} streaming={shown} onRegenerate={regenerate} onEdit={edit} onSwitch={switchBranch} />
+      )}
       {error && error.conversationId === id && (
         <div className="mx-auto mb-2 w-full max-w-3xl px-4 sm:px-6">
           <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -128,6 +126,7 @@ export function Chat({ id }: { id?: string }) {
         onSend={send}
         onStop={() => id && client.messages.stop({ conversationId: id })}
       />
+      {empty && <div className="flex-[1.15]" />}
     </div>
   )
 }
