@@ -1,0 +1,58 @@
+# PR ごとの一時プレビュー環境。ホスト側にポートを公開せず、tailnet にだけ出す。
+#   docker compose -f deploy/preview/compose.yaml -p orchat-pr-<N> up -d --build
+# ts が netns の持ち主で、app と db はその netns に相乗りする (= 互いに localhost)。
+# userspace モードなので tailnet から届くのは serve.json に書いた 443 だけ。5432 は出ない。
+services:
+  ts:
+    image: tailscale/tailscale:stable
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}        # tag:preview 付きの reusable + ephemeral キー
+      TS_HOSTNAME: orchat-pr-${PR}       # → https://orchat-pr-<N>.<tailnet>.ts.net
+      TS_STATE_DIR: /var/lib/tailscale   # 永続化して再デプロイでノード identity と証明書を使い回す
+      TS_USERSPACE: "true"               # TUN 不要。特権なし。tailnet に開くのは serve した口だけ
+      TS_ACCEPT_DNS: "false"             # MagicDNS で resolv.conf を奪わせない (openrouter.ai を引く)
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - ts-state:/var/lib/tailscale
+      - ./serve.json:/config/serve.json:ro
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    network_mode: service:ts
+    depends_on: [ts]
+    environment:
+      POSTGRES_USER: orchat
+      POSTGRES_PASSWORD: orchat
+      POSTGRES_DB: orchat
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orchat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    network_mode: service:ts
+    depends_on:
+      ts: { condition: service_started }
+      db: { condition: service_healthy }
+    environment:
+      # DEV_USER は NODE_ENV=production では無効 (src/server/auth.ts)。プレビューは preview で動かして自動ログインさせる
+      NODE_ENV: preview
+      DEV_USER: ${PREVIEW_USER:-preview@example.com}
+      ADMIN_EMAILS: ${PREVIEW_USER:-preview@example.com}
+      DATABASE_URL: postgres://orchat:orchat@localhost:5432/orchat
+      BASE_URL: https://orchat-pr-${PR}.${TAILNET_DOMAIN:-example.ts.net}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      MODELS: ${MODELS:-}
+      # OIDC_* は渡さない → oidcServer は素通り (src/server/auth.ts)。migration は起動時に自動適用
+    restart: unless-stopped
+
+volumes:
+  ts-state:
+  pgdata:

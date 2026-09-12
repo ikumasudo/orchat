@@ -92,7 +92,7 @@ jobs:
               fi
               echo "Rules: read AGENTS.md first. Make the smallest change that fully resolves the request."
               echo "Run \`pnpm check\` and fix errors until it passes. Do not commit; do not touch git."
-              echo "Do not edit .env*, dev/, drizzle/, Dockerfile, compose.yaml, .github/, opencode.json."
+              echo "Do not edit .env*, dev/, drizzle/, Dockerfile, compose.yaml, .github/, deploy/, opencode.json."
               echo "Do not add dependencies unless explicitly asked. Keep the diff minimal; no drive-by refactors."
               echo "pnpm's 'Ignored build scripts' warning is expected: do not run approve-builds or create pnpm-workspace.yaml."
               echo "Tools: \`websearch\` / \`webfetch\` are available for docs and APIs."
@@ -151,7 +151,7 @@ jobs:
         if: env.MODE != 'plan'
         run: |
           rm -rf node_modules pnpm-workspace.yaml
-          git checkout -- .github AGENTS.md CLAUDE.md opencode.json && git clean -fd .github
+          git checkout -- .github deploy AGENTS.md CLAUDE.md opencode.json && git clean -fd .github deploy
           if [ -z "$(git status --porcelain)" ]; then
             # no diff = the agent's final message is the deliverable; the tail of the log is roughly that message
             # issues/{n}/comments works for issues and PRs alike

@@ -35,6 +35,12 @@ pnpm dev                                          # dev script が NODE_EXTRA_CA
 
 スキーマ変更: `src/server/db/schema.ts` を編集 → `pnpm db:generate`。migration はサーバー起動時に自動適用。
 
+## PR プレビュー
+
+`preview` ラベルを付けた PR は、社内ホスト上に一時環境が立ち tailnet 内に
+`https://orchat-pr-<PR番号>.<tailnet>.ts.net` として公開される (PR に URL がコメントされる)。
+PR を閉じるかラベルを外すと撤去。セットアップは [deploy/preview/README.md](deploy/preview/README.md)。
+
 ## 本番
 
 ```sh
