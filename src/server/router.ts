@@ -7,6 +7,7 @@ import { chatSettings, serverTools, userPart, type AssistantBody, type ChatSetti
 import { listModels, responsesStream } from './openrouter.js'
 import { applyEvent, initialState } from '../shared/responses.js'
 import { deepestLeaf, pathToRoot, siblings } from './tree.js'
+import { escapeLike } from '../shared/search.js'
 import { createRun, runs, type Run } from './runs.js'
 
 const base = os.$context<{ user: User }>()
@@ -30,6 +31,30 @@ const conversationsRouter = {
       .where(eq(conversations.userId, context.user.id))
       .orderBy(desc(conversations.updatedAt)),
   ),
+  // タイトル + 本文 (input_text / output_text の text) の部分一致検索。会話単位で返す
+  // ponytail: 全走査。遅くなったら messages に検索用テキストの generated column + pg_trgm GIN を追加する
+  search: base.input(z.object({ q: z.string().min(1).max(200) })).handler(({ context, input }) => {
+    const q = input.q.trim()
+    if (!q) return []
+    const pat = `%${escapeLike(q)}%`
+    return db
+      .select({ id: conversations.id, title: conversations.title, updatedAt: conversations.updatedAt })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.userId, context.user.id),
+          sql`(${conversations.title} ilike ${pat} escape '\\' or exists (
+            select 1 from ${messages}
+            where ${messages.conversationId} = ${conversations.id}
+              and jsonb_path_query_array(
+                    ${messages.body},
+                    'strict $.**.content[*] ? (@.type == "input_text" || @.type == "output_text").text'
+                  )::text ilike ${pat} escape '\\'))`,
+        ),
+      )
+      .orderBy(desc(conversations.updatedAt))
+      .limit(50)
+  }),
   get: base.input(z.object({ id: z.uuid() })).handler(async ({ context, input }) => {
     const conversation = await ownConversation(context.user.id, input.id)
     const rows = (await db.query.messages.findMany({ where: eq(messages.conversationId, input.id) })) as DbMessage[]
