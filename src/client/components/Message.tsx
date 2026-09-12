@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { cloneElement, createContext, isValidElement, useContext, useState, type JSX, type ReactElement, type ReactNode } from 'react'
 import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, FileTextIcon, PencilIcon, RefreshCwIcon } from 'lucide-react'
 import type { Annotation, AssistantBody, DbMessage, Item, UserBody, UserPart } from '../../shared/types.js'
 import { isToolItem } from '../../shared/responses.js'
@@ -13,7 +13,11 @@ import {
 } from '@/components/ai-elements/message'
 import { Source, Sources, SourcesContent, SourcesTrigger } from '@/components/ai-elements/sources'
 import { Loader } from '@/components/ai-elements/loader'
+import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block'
+import { JSXPreview, JSXPreviewContent, JSXPreviewError } from '@/components/ai-elements/jsx-preview'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import type { Components, ExtraProps } from 'streamdown'
 import { Reasoning } from './Reasoning.js'
 import { ToolItem } from './ToolItem.js'
 
@@ -150,7 +154,59 @@ function ItemView({ item, streaming }: { item: Item; streaming?: boolean }) {
   if (isToolItem(item)) return <ToolItem item={item} />
   if (item.type === 'message') {
     const text = (item.content ?? []).map((p) => p.text ?? '').join('')
-    return text ? <MessageResponse mode={streaming ? 'streaming' : 'static'}>{text}</MessageResponse> : null
+    if (!text) return null
+    return (
+      <JsxPreviewStreamingContext.Provider value={streaming ?? false}>
+        <MessageResponse mode={streaming ? 'streaming' : 'static'} components={streamdownComponents}>{text}</MessageResponse>
+      </JsxPreviewStreamingContext.Provider>
+    )
   }
   return null // 未知の item type は描かない (DB には残っている)
+}
+
+// jsx/tsx のコードフェンスだけプレビュー付きタブに差し替える。それ以外は Streamdown 既定のまま。
+// pre を差し替えるのでインラインコード (`code`) には触れない。モジュールスコープに置いて identity を安定させる。
+const streamdownComponents: Components = { pre: JsxFencePre }
+
+const JsxPreviewStreamingContext = createContext(false)
+
+const jsxFenceLanguage = (className?: string) => /language-(jsx|tsx)\b/.exec(className ?? '')?.[1] as 'jsx' | 'tsx' | undefined
+
+const codeText = (node: ReactNode): string =>
+  Array.isArray(node) ? node.map(codeText).join('') : typeof node === 'string' || typeof node === 'number' ? String(node) : ''
+
+function JsxFencePre({ children }: JSX.IntrinsicElements['pre'] & ExtraProps) {
+  const child = Array.isArray(children) ? children[0] : children
+  if (isValidElement<{ className?: string; children?: ReactNode }>(child)) {
+    const language = jsxFenceLanguage(child.props.className)
+    if (language) return <JsxPreviewBlock code={codeText(child.props.children)} language={language} />
+  }
+  // Streamdown の既定の pre と同じ振る舞い (code に data-block を付けてそのまま返す)
+  return isValidElement(children) ? cloneElement(children as ReactElement<Record<string, unknown>>, { 'data-block': 'true' }) : children
+}
+
+function JsxPreviewBlock({ code, language }: { code: string; language: 'jsx' | 'tsx' }) {
+  const streaming = useContext(JsxPreviewStreamingContext)
+  return (
+    <Tabs defaultValue="preview" className="my-4 gap-0 overflow-hidden rounded-lg border">
+      <div className="flex items-center gap-2 border-b bg-muted/40 px-2 py-1">
+        <TabsList className="h-8">
+          <TabsTrigger value="preview">プレビュー</TabsTrigger>
+          <TabsTrigger value="code">コード</TabsTrigger>
+        </TabsList>
+        <span className="ml-auto font-mono text-xs lowercase text-muted-foreground">{language}</span>
+      </div>
+      <TabsContent value="preview" className="mt-0 p-4">
+        <JSXPreview jsx={code} isStreaming={streaming}>
+          <JSXPreviewContent />
+          <JSXPreviewError />
+        </JSXPreview>
+      </TabsContent>
+      <TabsContent value="code" className="mt-0">
+        <CodeBlock code={code} language={language} className="rounded-none border-0">
+          <CodeBlockCopyButton />
+        </CodeBlock>
+      </TabsContent>
+    </Tabs>
+  )
 }
