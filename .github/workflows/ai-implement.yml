@@ -75,7 +75,7 @@ jobs:
             if [ "$MODE" = plan ]; then
               echo "Write an implementation plan for the GitHub issue below. Do NOT change any file in the repository other than PLAN.md; do not touch git."
               echo "Read AGENTS.md first, then actually read the code the issue touches (do not guess from file names)."
-              echo "Write the plan to \`/work/PLAN.md\` (Markdown, same language as the issue, no top-level \`## Plan\` heading) with these sections:"
+              echo "Write the plan to \`/work/PLAN.md\` (Markdown, same language as the issue, no title, sub-headings as \`###\` or lower) with these sections:"
               echo "approach, files to change (path + one line each), acceptance criteria, open questions for the human (empty if none)."
               echo "Keep it as short as possible: the smallest change that fully resolves the issue, no speculative work."
               echo "If the issue already has a \`## Plan\` section, treat it as the previous version and rewrite it applying the request below and the thread."
