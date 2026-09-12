@@ -1,7 +1,8 @@
-import { cloneElement, createContext, isValidElement, useContext, useState, type JSX, type ReactElement, type ReactNode } from 'react'
-import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, FileTextIcon, PencilIcon, RefreshCwIcon } from 'lucide-react'
+import { cloneElement, createContext, isValidElement, useContext, useEffect, useRef, useState, type JSX, type ReactElement, type ReactNode } from 'react'
+import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, FileTextIcon, PencilIcon, RefreshCwIcon } from 'lucide-react'
 import type { Annotation, AssistantBody, DbMessage, Item, UserBody, UserPart } from '../../shared/types.js'
-import { isToolItem } from '../../shared/responses.js'
+import { serverTools } from '../../shared/types.js'
+import { isToolItem, itemText, splitStepsAnswer } from '../../shared/responses.js'
 import {
   Message as AiMessage,
   MessageAction,
@@ -15,8 +16,11 @@ import { Source, Sources, SourcesContent, SourcesTrigger } from '@/components/ai
 import { Loader } from '@/components/ai-elements/loader'
 import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block'
 import { JSXPreview, JSXPreviewContent, JSXPreviewError } from '@/components/ai-elements/jsx-preview'
+import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { cn } from '@/lib/utils'
 import type { Components, ExtraProps } from 'streamdown'
 import { Reasoning } from './Reasoning.js'
 import { ToolItem } from './ToolItem.js'
@@ -120,15 +124,18 @@ function UserContent({ content }: { content: UserPart[] }) {
 }
 const attachmentUrl = (ref: string) => (ref.startsWith('attachment:') ? `/attachments/${ref.slice('attachment:'.length)}` : ref)
 
-// output items を順に描く: reasoning → tool → message … の順がそのまま「活動のタイムライン」になる
+// output を「活動ブロック (ステップ)」と「回答」に分けて描く。
+// 末尾に連続する message が回答、それより前 (reasoning・ツール・途中 message) は折りたたみ 1 つに集約する
 function AssistantContent({ body, streaming }: { body: AssistantBody; streaming?: boolean }) {
   const items = body.output.filter(Boolean)
+  const { steps, answer } = splitStepsAnswer(items)
   const citations = new Map<string, Annotation>()
   for (const it of items) for (const p of it.content ?? []) for (const a of p.annotations ?? []) if (a.type === 'url_citation' && a.url) citations.set(a.url, a)
   return (
     <MessageContent className="w-full text-[15px] leading-relaxed">
-      {items.map((item, i) => (
-        <ItemView key={item.id ?? i} item={item} streaming={streaming} />
+      {steps.length > 0 && <ActivityBlock steps={steps} streaming={streaming} />}
+      {answer.map((item, i) => (
+        <ItemView key={item.id ?? `a${i}`} item={item} streaming={streaming} />
       ))}
       {streaming && !items.length && <Loader className="text-muted-foreground" />}
       {body.error && <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{body.error}</p>}
@@ -148,6 +155,75 @@ function AssistantContent({ body, streaming }: { body: AssistantBody; streaming?
     </MessageContent>
   )
 }
+
+// 思考・ツール利用・途中テキストを 1 つの折りたたみブロックに集約する。
+// 既定は閉じ、開くと各ステップを既存の表示 (Reasoning / ToolItem / MessageResponse) で並べる。開閉は state のみ
+function ActivityBlock({ steps, streaming }: { steps: Item[]; streaming?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const active = streaming ? [...steps].reverse().find((it) => (it.type === 'reasoning' || isToolItem(it)) && it.status !== 'completed') : undefined
+  const seconds = useActiveSeconds(active != null)
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="mb-2 rounded-md border bg-muted/40">
+      <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground">
+        <BrainIcon className="size-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{active ? <ActiveStep item={active} /> : summarizeSteps(steps, seconds)}</span>
+        <ChevronDownIcon className={cn('size-4 shrink-0 transition-transform', open && 'rotate-180')} />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="px-3 pb-1">
+        {steps.map((item, i) => (
+          <ItemView key={item.id ?? `s${i}`} item={item} streaming={streaming} />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+// ストリーミング中は閉じたまま現在進行中の 1 ステップだけを 1 行で見せる
+function ActiveStep({ item }: { item: Item }) {
+  if (item.type === 'reasoning') return <Shimmer duration={1}>思考中…</Shimmer>
+  const detail = item.action?.query ?? item.url ?? ''
+  return <>{detail ? `${toolLabel(item)}: ${detail}` : `${toolLabel(item)}: 実行中`}</>
+}
+
+// 進行中のステップがあった時間を測る (リロード後は分からないので undefined のまま)
+function useActiveSeconds(active: boolean) {
+  const [seconds, setSeconds] = useState<number | undefined>(undefined)
+  const start = useRef<number | null>(null)
+  useEffect(() => {
+    if (active) {
+      if (start.current == null) {
+        start.current = Date.now()
+        setSeconds(undefined)
+      }
+    } else if (start.current != null) {
+      setSeconds(Math.max(1, Math.ceil((Date.now() - start.current) / 1000)))
+      start.current = null
+    }
+  }, [active])
+  return seconds
+}
+
+// 閉じたブロックの 1 行サマリー。Reasoning.tsx の「N 秒思考」「思考 (内容は非公開)」の表現に合わせる
+function summarizeSteps(steps: Item[], seconds?: number) {
+  const parts: string[] = []
+  const reasonings = steps.filter((s) => s.type === 'reasoning')
+  if (reasonings.length > 0) {
+    const hidden = reasonings.every((r) => !itemText(r) && !!r.encrypted_content)
+    parts.push(hidden && seconds == null ? '思考 (内容は非公開)' : seconds != null ? `${seconds} 秒思考` : '思考')
+  }
+  const counts = new Map<string, number>()
+  for (const t of steps.filter(isToolItem)) counts.set(toolLabel(t), (counts.get(toolLabel(t)) ?? 0) + 1)
+  for (const [label, n] of counts) parts.push(n > 1 ? `${label} ${n} 件` : label)
+  if (parts.length === 0) {
+    const text = steps.map((s) => (s.content ?? []).map((p) => p.text ?? '').join('')).join(' ').trim().replace(/\s+/g, ' ')
+    if (text) return text.length > 40 ? `${text.slice(0, 40)}…` : text
+    return `${steps.length} ステップ`
+  }
+  return steps.length > 1 ? `${steps.length} ステップ · ${parts.join(' · ')}` : parts.join(' · ')
+}
+
+const toolLabel = (item: Item) =>
+  serverTools.find((t) => t.id === item.type)?.label ?? (/search/.test(item.type) ? 'Web検索' : item.type.replace(/^openrouter:/, ''))
 
 function ItemView({ item, streaming }: { item: Item; streaming?: boolean }) {
   if (item.type === 'reasoning') return <Reasoning item={item} streaming={streaming} />
