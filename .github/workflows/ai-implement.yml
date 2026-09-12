@@ -54,6 +54,7 @@ jobs:
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         run: |
+          set -o pipefail # tee must not mask the agent's exit code
           # playwright image = node 24 + chromium + its system libs; --network host reaches the postgres service
           docker run --rm --init --ipc=host --network host --user "$(id -u):$(id -g)" \
             -e HOME=/tmp -e npm_config_prefix=/tmp/npm -e npm_config_store_dir=/tmp/pnpm-store -e OPENCODE_API_KEY \
@@ -61,13 +62,15 @@ jobs:
             mcr.microsoft.com/playwright:v1.63.0-noble \
             bash -c 'export PATH=/tmp/npm/bin:$PATH AGENT_BROWSER_EXECUTABLE_PATH=$(ls /ms-playwright/chromium-*/chrome-linux*/chrome | head -1) \
               && npm i -g pnpm@10 opencode-ai@1.18.30 agent-browser@0.37.1 \
-              && pnpm install --frozen-lockfile && opencode run < /prompt.md' # stdin, not argv: `pkill -f <word in prompt>` would kill this shell
+              && pnpm install --frozen-lockfile && opencode run < /prompt.md' | tee /tmp/agent.log # stdin, not argv: `pkill -f <word in prompt>` would kill this shell
       - name: Enforce off-limits paths, bail if no changes
         run: |
           rm -rf node_modules pnpm-workspace.yaml
           git checkout -- .github AGENTS.md CLAUDE.md opencode.json && git clean -fd .github
           if [ -z "$(git status --porcelain)" ]; then
-            gh issue comment "$N" -b "ai-implement: agent produced no changes. $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            # no diff = the agent's final message is the deliverable; the tail of the log is roughly that message
+            gh issue comment "$N" -b "$(printf 'ai-implement: agent produced no changes. %s\n\n<details><summary>agent output (tail)</summary>\n\n```\n%s\n```\n</details>' \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" "$(tail -c 6000 /tmp/agent.log | sed 's/\x1b\[[0-9;]*m//g')")"
             exit 1
           fi
       - uses: pnpm/action-setup@v4
