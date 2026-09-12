@@ -127,3 +127,31 @@
     *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   }
 }
+
+/* Streamdown のコードブロックとテーブルを軽い見た目にする。二重枠をなくし、行間の横線だけ残す。
+   素の CSS で上書きする (utilities レイヤーより後に勝つ)。新しい色は使わない。 */
+[data-streamdown='code-block'] {
+  border-width: 0;
+  background-color: var(--muted);
+}
+[data-streamdown='code-block-body'] {
+  border-width: 0;
+  background-color: transparent;
+}
+[data-streamdown='code-block-actions'] {
+  border-color: transparent;
+}
+[data-streamdown='table-wrapper'] {
+  gap: 0;
+  border-width: 0;
+  background-color: transparent;
+  padding: 0;
+}
+[data-streamdown='table-wrapper'] > div:has(> table) {
+  border-width: 0;
+  border-radius: 0;
+  background-color: transparent;
+}
+[data-streamdown='table-header'] {
+  background-color: transparent;
+}
