@@ -4,3 +4,4 @@ dist
 test/fixtures/*.jsonl
 dev/mock-oidc/*.pem
 dev/mock-oidc/*.p12
+AGENTS.local.md
