@@ -40,7 +40,7 @@ jobs:
             echo "Tools: \`websearch\` / \`webfetch\` are available for docs and APIs."
             echo "To verify UI changes in a real browser: \`pnpm dev > /tmp/dev.log 2>&1 &\`, wait until http://localhost:5174 responds,"
             echo "run \`agent-browser skills get core\` once to learn the CLI, then \`agent-browser open http://localhost:5174\` (Postgres is running; you are logged in automatically as DEV_USER)."
-            echo "Before finishing: \`agent-browser close --all\` and stop the dev server (\`pkill -f concurrently\`)."
+            echo "Before finishing: \`agent-browser close --all\` and stop the dev server (\`pkill -f '[c]oncurrently'\`)."
             echo
             gh issue view "$N" --json title,body -q '"# Issue #'"$N"': " + .title + "\n\n" + .body'
           } > /tmp/prompt.md
@@ -61,7 +61,7 @@ jobs:
             mcr.microsoft.com/playwright:v1.63.0-noble \
             bash -c 'export PATH=/tmp/npm/bin:$PATH AGENT_BROWSER_EXECUTABLE_PATH=$(ls /ms-playwright/chromium-*/chrome-linux*/chrome | head -1) \
               && npm i -g pnpm@10 opencode-ai@1.18.30 agent-browser@0.37.1 \
-              && pnpm install --frozen-lockfile && opencode run "$(cat /prompt.md)"'
+              && pnpm install --frozen-lockfile && opencode run < /prompt.md' # stdin, not argv: `pkill -f <word in prompt>` would kill this shell
       - name: Enforce off-limits paths, bail if no changes
         run: |
           rm -rf node_modules pnpm-workspace.yaml
