@@ -28,6 +28,8 @@ jobs:
             echo "Implement the GitHub issue below in this repository."
             echo "Rules: read AGENTS.md first. Make the smallest change that fully resolves the issue."
             echo "Run \`pnpm check\` and fix errors until it passes. Do not commit; do not touch git."
+            echo "Do not edit .env*, dev/, drizzle/, Dockerfile, compose.yaml, .github/, opencode.json."
+            echo "Do not add dependencies unless the issue explicitly asks. Keep the diff minimal; no drive-by refactors."
             echo
             gh issue view "$N" --json title,body -q '"# Issue #'"$N"': " + .title + "\n\n" + .body'
           } > /tmp/prompt.md
