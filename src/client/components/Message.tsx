@@ -264,8 +264,8 @@ function JsxFencePre({ children }: JSX.IntrinsicElements['pre'] & ExtraProps) {
 function JsxPreviewBlock({ code, language }: { code: string; language: 'jsx' | 'tsx' }) {
   const streaming = useContext(JsxPreviewStreamingContext)
   return (
-    <Tabs defaultValue="preview" className="my-4 gap-0 overflow-hidden rounded-lg border">
-      <div className="flex items-center gap-2 border-b bg-muted/40 px-2 py-1">
+    <Tabs defaultValue="preview" className="my-4 gap-0 overflow-hidden rounded-xl border-0 bg-muted p-2">
+      <div className="flex items-center gap-2 px-2 py-1">
         <TabsList className="h-8">
           <TabsTrigger value="preview">プレビュー</TabsTrigger>
           <TabsTrigger value="code">コード</TabsTrigger>
