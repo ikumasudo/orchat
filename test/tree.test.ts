@@ -30,6 +30,6 @@ test('deepestLeaf follows newest child', () => {
   assert.equal(deepestLeaf(rows, "a1'"), "u2'")
 })
 
-test('empty tree', () => {
+test('pathToRoot returns [] for an empty tree', () => {
   assert.deepEqual(pathToRoot([], 'x'), [])
 })
