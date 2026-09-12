@@ -18,6 +18,7 @@ test('pathToRoot returns root→leaf', () => {
   assert.deepEqual(pathToRoot(rows, 'a2').map((r) => r.id), ['u1', 'a1', 'u2', 'a2'])
   assert.deepEqual(pathToRoot(rows, "u2'").map((r) => r.id), ['u1', "a1'", "u2'"])
   assert.deepEqual(pathToRoot(rows, null), [])
+  assert.deepEqual(pathToRoot([], 'a1'), [])
 })
 
 test('siblings groups by parent in creation order', () => {
