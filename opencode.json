@@ -1,5 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "opencode/kimi-k2.7-code",
+  "model": "opencode-go/kimi-k2.7-code",
   "permission": "allow"
 }
