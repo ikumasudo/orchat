@@ -155,3 +155,13 @@
 [data-streamdown='table-header'] {
   background-color: transparent;
 }
+
+/* 回答内の Markdown 見出しは記事ではなくチャットなので控えめに (Streamdown 既定は text-3xl〜) */
+.is-assistant :where(h1, h2, h3):not(.jsx-preview-content *) {
+  line-height: 1.35;
+  margin-top: 1.25em;
+  margin-bottom: 0.5em;
+}
+.is-assistant :where(h1):not(.jsx-preview-content *) { font-size: 1.375rem; }
+.is-assistant :where(h2):not(.jsx-preview-content *) { font-size: 1.2rem; }
+.is-assistant :where(h3):not(.jsx-preview-content *) { font-size: 1.05rem; }

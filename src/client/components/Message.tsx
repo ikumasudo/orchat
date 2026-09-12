@@ -13,7 +13,6 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message'
 import { Source, Sources, SourcesContent, SourcesTrigger } from '@/components/ai-elements/sources'
-import { Loader } from '@/components/ai-elements/loader'
 import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block'
 import { JSXPreview, JSXPreviewContent, JSXPreviewError } from '@/components/ai-elements/jsx-preview'
 import { Shimmer } from '@/components/ai-elements/shimmer'
@@ -29,12 +28,13 @@ type Props = {
   message: Pick<DbMessage, 'id' | 'role' | 'body'> & Partial<DbMessage>
   siblings?: string[]
   streaming?: boolean
+  last?: boolean // 最後のメッセージは操作ボタンを常時表示 (それ以外はホバーで)
   onRegenerate?: () => void
   onEdit?: () => void
   onSwitch?: (id: string) => void
 }
 
-export function Message({ message: m, siblings = [], streaming, onRegenerate, onEdit, onSwitch }: Props) {
+export function Message({ message: m, siblings = [], streaming, last, onRegenerate, onEdit, onSwitch }: Props) {
   const idx = siblings.indexOf(m.id)
   const isUser = m.role === 'user'
   const text = isUser ? '' : assistantText(m.body as AssistantBody)
@@ -54,24 +54,26 @@ export function Message({ message: m, siblings = [], streaming, onRegenerate, on
               </MessageAction>
             </span>
           )}
-          <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
-            {isUser && onEdit && (
-              <MessageAction tooltip="編集して送り直す" onClick={onEdit}>
-                <PencilIcon />
-              </MessageAction>
+          <div className={cn('flex min-w-0 items-center gap-1 transition-opacity', !last && 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100')}>
+            <MessageActions>
+              {isUser && onEdit && (
+                <MessageAction tooltip="編集して送り直す" onClick={onEdit}>
+                  <PencilIcon />
+                </MessageAction>
+              )}
+              {!isUser && text && <CopyAction text={text} />}
+              {!isUser && onRegenerate && (
+                <MessageAction tooltip="再生成" onClick={onRegenerate}>
+                  <RefreshCwIcon />
+                </MessageAction>
+              )}
+            </MessageActions>
+            {!isUser && (m.model || m.cost != null || m.usage) && (
+              <span className="ml-2 truncate font-mono text-[11px] tabular-nums">
+                {[m.model, m.usage && tokens(m.usage), m.cost != null && `$${Number(m.cost).toFixed(5)}`].filter(Boolean).join('  ·  ')}
+              </span>
             )}
-            {!isUser && text && <CopyAction text={text} />}
-            {!isUser && onRegenerate && (
-              <MessageAction tooltip="再生成" onClick={onRegenerate}>
-                <RefreshCwIcon />
-              </MessageAction>
-            )}
-          </MessageActions>
-          {!isUser && (m.model || m.cost != null || m.usage) && (
-            <span className="ml-2 truncate font-mono text-[11px] tabular-nums">
-              {[m.model, m.usage && tokens(m.usage), m.cost != null && `$${Number(m.cost).toFixed(5)}`].filter(Boolean).join('  ·  ')}
-            </span>
-          )}
+          </div>
         </footer>
       )}
     </AiMessage>
@@ -118,7 +120,7 @@ function UserContent({ content }: { content: UserPart[] }) {
           )}
         </MessageAttachments>
       )}
-      {text && <MessageContent className="whitespace-pre-wrap text-[15px] leading-relaxed">{text}</MessageContent>}
+      {text && <MessageContent className="whitespace-pre-wrap text-[15px] leading-relaxed group-[.is-user]:rounded-2xl group-[.is-user]:py-2.5">{text}</MessageContent>}
     </>
   )
 }
@@ -137,7 +139,7 @@ function AssistantContent({ body, streaming }: { body: AssistantBody; streaming?
       {answer.map((item, i) => (
         <ItemView key={item.id ?? `a${i}`} item={item} streaming={streaming} />
       ))}
-      {streaming && !items.length && <Loader className="text-muted-foreground" />}
+      {streaming && !items.length && <span aria-label="生成中" className="my-1.5 block size-3 animate-pulse rounded-full bg-foreground/50" />}
       {body.error && <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{body.error}</p>}
       {citations.size > 0 && (
         <Sources className="mb-0 mt-2">
@@ -261,10 +263,14 @@ function JsxFencePre({ children }: JSX.IntrinsicElements['pre'] & ExtraProps) {
   return isValidElement(children) ? cloneElement(children as ReactElement<Record<string, unknown>>, { 'data-block': 'true' }) : children
 }
 
+// import/export や関数宣言で始まるものは「コード例」であってそのまま描けないので、コードタブを既定にする
+const looksRenderable = (code: string) => !/^\s*(import|export|function|const|let|var|class|type|interface)\b/m.test(code)
+
 function JsxPreviewBlock({ code, language }: { code: string; language: 'jsx' | 'tsx' }) {
   const streaming = useContext(JsxPreviewStreamingContext)
+  const [tab, setTab] = useState(looksRenderable(code) ? 'preview' : 'code')
   return (
-    <Tabs defaultValue="preview" className="my-4 gap-0 overflow-hidden rounded-xl border-0 bg-muted p-2">
+    <Tabs value={tab} onValueChange={setTab} className="my-4 gap-0 overflow-hidden rounded-xl border-0 bg-muted p-2">
       <div className="flex items-center gap-2 px-2 py-1">
         <TabsList className="h-8">
           <TabsTrigger value="preview">プレビュー</TabsTrigger>
@@ -273,7 +279,7 @@ function JsxPreviewBlock({ code, language }: { code: string; language: 'jsx' | '
         <span className="ml-auto font-mono text-xs lowercase text-muted-foreground">{language}</span>
       </div>
       <TabsContent value="preview" className="mt-0 p-4">
-        <JSXPreview jsx={code} isStreaming={streaming}>
+        <JSXPreview jsx={code} isStreaming={streaming} onError={() => setTab('code')}>
           <JSXPreviewContent />
           <JSXPreviewError />
         </JSXPreview>

@@ -265,7 +265,7 @@ function AttachmentsHeader({ show, editing, onCancelEdit, kept, onRemoveKept }: 
 function ModelPicker({ models, value, onChange }: { models: ORModel[]; value: string; onChange: (id: string) => void }) {
   const [open, setOpen] = useState(false)
   const current = models.find((m) => m.id === value)
-  const groups = Object.entries(Object.groupBy(models, (m) => m.id.split('/')[0]))
+  const groups = Object.entries(Object.groupBy(models, (m) => (m.name.includes(':') ? m.name.split(':')[0].trim() : m.id.split('/')[0])))
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
