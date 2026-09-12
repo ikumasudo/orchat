@@ -2,6 +2,10 @@ name: ai-implement
 on:
   issues:
     types: [labeled]
+  issue_comment: # `@ai ...` on a PR: revise the same branch
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       issue: { description: issue number, required: true }
@@ -10,10 +14,16 @@ permissions:
   pull-requests: write
   issues: write
 concurrency:
-  group: ai-implement-${{ github.event.issue.number || inputs.issue }}
+  group: ai-implement-${{ github.event.issue.number || github.event.pull_request.number || inputs.issue }}
 jobs:
   implement:
-    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'ai-implement'
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.label.name == 'ai-implement'
+      || (startsWith(github.event.comment.body, '@ai')
+          && github.event.comment.user.type != 'Bot'
+          && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+          && (github.event.issue.pull_request || github.event.pull_request))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -24,25 +34,58 @@ jobs:
         options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       GH_TOKEN: ${{ github.token }}
-      N: ${{ github.event.issue.number || inputs.issue }}
+      GH_REPO: ${{ github.repository }}
     steps:
+      - name: Resolve target # sets MODE / N (issue) / PR / BRANCH / REF for the steps below
+        env:
+          COMMENT_ID: ${{ github.event.comment.id }}
+          REACT: ${{ github.event_name == 'issue_comment' && 'issues' || 'pulls' }}
+          PR: ${{ github.event.issue.number || github.event.pull_request.number }}
+          N: ${{ github.event.issue.number || inputs.issue }}
+        run: |
+          if [ -n "$COMMENT_ID" ]; then
+            BRANCH=$(gh pr view "$PR" --json headRefName -q .headRefName)
+            gh api "repos/$GH_REPO/$REACT/comments/$COMMENT_ID/reactions" -f content=eyes --silent # ack: the run takes minutes
+            case "$BRANCH" in ai/issue-*) N=${BRANCH#ai/issue-};; *) N=;; esac # hand-made PR: no issue context
+            printf 'MODE=followup\nN=%s\nPR=%s\nBRANCH=%s\nREF=refs/heads/%s\n' "$N" "$PR" "$BRANCH" "$BRANCH" >> "$GITHUB_ENV"
+          else
+            printf 'MODE=new\nN=%s\nPR=\nBRANCH=ai/issue-%s\nREF=%s\n' "$N" "$N" "$GITHUB_REF" >> "$GITHUB_ENV"
+          fi
       - uses: actions/checkout@v4
-        with: { persist-credentials: false } # the agent container sees .git; keep the token out of it
+        with: { ref: "${{ env.REF }}", persist-credentials: false } # the agent container sees .git; keep the token out of it
       - name: Build prompt
+        env: # comment fields go through env, never into the shell text (injection)
+          C_USER: ${{ github.event.comment.user.login }}
+          C_BODY: ${{ github.event.comment.body }}
+          C_PATH: ${{ github.event.comment.path }}
+          C_LINE: ${{ github.event.comment.line || github.event.comment.original_line }}
+          C_HUNK: ${{ github.event.comment.diff_hunk }}
         run: |
           {
-            echo "Implement the GitHub issue below in this repository."
-            echo "Rules: read AGENTS.md first. Make the smallest change that fully resolves the issue."
+            if [ "$MODE" = new ]; then
+              echo "Implement the GitHub issue below in this repository."
+            else
+              echo "Address the review comment below on the open pull request #$PR in this repository."
+              echo "The branch already contains the previous implementation; change only what the comment asks."
+            fi
+            echo "Rules: read AGENTS.md first. Make the smallest change that fully resolves the request."
             echo "Run \`pnpm check\` and fix errors until it passes. Do not commit; do not touch git."
             echo "Do not edit .env*, dev/, drizzle/, Dockerfile, compose.yaml, .github/, opencode.json."
-            echo "Do not add dependencies unless the issue explicitly asks. Keep the diff minimal; no drive-by refactors."
+            echo "Do not add dependencies unless explicitly asked. Keep the diff minimal; no drive-by refactors."
             echo "pnpm's 'Ignored build scripts' warning is expected: do not run approve-builds or create pnpm-workspace.yaml."
             echo "Tools: \`websearch\` / \`webfetch\` are available for docs and APIs."
             echo "To verify UI changes in a real browser: \`pnpm dev > /tmp/dev.log 2>&1 &\`, wait until http://localhost:5174 responds,"
             echo "run \`agent-browser skills get core\` once to learn the CLI, then \`agent-browser open http://localhost:5174\` (Postgres is running; you are logged in automatically as DEV_USER)."
             echo "Before finishing: \`agent-browser close --all\` and stop the dev server (\`pkill -f '[c]oncurrently'\`)."
             echo
-            gh issue view "$N" --json title,body -q '"# Issue #'"$N"': " + .title + "\n\n" + .body'
+            if [ "$MODE" = followup ]; then
+              echo "# Review comment by @$C_USER"
+              if [ -n "$C_PATH" ]; then printf 'File: %s (line %s)\n\n```diff\n%s\n```\n\n' "$C_PATH" "$C_LINE" "$C_HUNK"; fi
+              printf '%s\n\n# Current PR diff\n\n```diff\n' "${C_BODY#@ai}"
+              gh pr diff "$PR" | head -c 40000
+              printf '\n```\n\n'
+            fi
+            if [ -n "$N" ]; then gh issue view "$N" --json title,body -q '"# Issue #'"$N"': " + .title + "\n\n" + .body'; fi
           } > /tmp/prompt.md
           {
             echo "DATABASE_URL=postgres://orchat:orchat@localhost:5432/orchat"
@@ -69,7 +112,8 @@ jobs:
           git checkout -- .github AGENTS.md CLAUDE.md opencode.json && git clean -fd .github
           if [ -z "$(git status --porcelain)" ]; then
             # no diff = the agent's final message is the deliverable; the tail of the log is roughly that message
-            gh issue comment "$N" -b "$(printf 'ai-implement: agent produced no changes. %s\n\n<details><summary>agent output (tail)</summary>\n\n```\n%s\n```\n</details>' \
+            # issues/{n}/comments works for issues and PRs alike
+            gh api "repos/$GH_REPO/issues/${PR:-$N}/comments" --silent -f body="$(printf 'ai-implement: agent produced no changes. %s\n\n<details><summary>agent output (tail)</summary>\n\n```\n%s\n```\n</details>' \
               "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" "$(tail -c 6000 /tmp/agent.log | sed 's/\x1b\[[0-9;]*m//g')")"
             exit 1
           fi
@@ -81,19 +125,32 @@ jobs:
         id: gate
         continue-on-error: true
         run: pnpm install --frozen-lockfile && pnpm check
-      - name: Push branch and open draft PR
+      - name: Push branch, then open draft PR or report on the existing one
+        env:
+          STATUS: ${{ steps.gate.outcome == 'success' && 'passed' || 'FAILED' }}
+          C_URL: ${{ github.event.comment.html_url }}
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git switch -c "ai/issue-$N"
-          git add -A && git commit -m "AI: implement #$N"
-          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" "HEAD:refs/heads/ai/issue-$N"
-          STATUS="${{ steps.gate.outcome == 'success' && 'passed' || 'FAILED' }}"
-          gh pr create --draft --head "ai/issue-$N" \
-            --title "AI: $(gh issue view "$N" --json title -q .title)" \
-            --body "Closes #$N
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}"
+          RUN="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          git add -A
+          if [ "$MODE" = followup ]; then
+            git commit -m "AI: address review comment on #$PR"
+            git push "$REMOTE" "HEAD:refs/heads/$BRANCH" # no --force: never drop commits a human pushed meanwhile
+            gh pr comment "$PR" -b "ai-implement: pushed $(git rev-parse --short HEAD) for $C_URL. \`pnpm check\` on runner: **$STATUS**. Run: $RUN"
+          else
+            git switch -c "$BRANCH"
+            git commit -m "AI: implement #$N"
+            git push --force "$REMOTE" "HEAD:refs/heads/$BRANCH"
+            gh pr create --draft --head "$BRANCH" \
+              --title "AI: $(gh issue view "$N" --json title -q .title)" \
+              --body "Closes #$N
 
           Generated by opencode from the issue. \`pnpm check\` on runner: **$STATUS**.
-          Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            || echo "PR already exists; branch updated"
+          Run: $RUN
+
+          Reply \`@ai <request>\` on this PR (conversation or inline) to have the branch revised." \
+              || echo "PR already exists; branch updated"
+          fi
           [ "$STATUS" = passed ]
