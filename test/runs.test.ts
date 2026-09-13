@@ -28,3 +28,25 @@ test('late subscriber replays buffer then receives live events; abort stops wait
   assert.deepEqual(await p, [])
   assert.equal(run2.done, false)
 })
+
+// 購読者 A が待機中に切断 → その後に来た購読者 B が (解決済み promise を await し続けて) イベントループを塞がないこと
+test('abort of one subscriber does not spin later subscribers', { timeout: 2000 }, async () => {
+  const run = createRun<number>(null)
+  const a = new AbortController()
+  const pa = (async () => {
+    for await (const _ of run.subscribe(a.signal)) void _
+  })()
+  await new Promise((r) => setTimeout(r, 0))
+  a.abort()
+  await pa
+  const got: number[] = []
+  const pb = (async () => {
+    for await (const ev of run.subscribe()) got.push(ev)
+  })()
+  // イベントループが回っていれば setTimeout が発火する
+  await new Promise((r) => setTimeout(r, 20))
+  run.push(1)
+  run.end()
+  await pb
+  assert.deepEqual(got, [1])
+})
