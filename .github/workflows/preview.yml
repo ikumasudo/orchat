@@ -4,29 +4,52 @@ name: preview
 on:
   pull_request: # pull_request_target は使わない (PR のコードを特権付きで走らせないため)
     types: [labeled, unlabeled, synchronize, reopened, closed]
+  workflow_dispatch: # ai-implement が呼ぶ: GITHUB_TOKEN による push / ラベル付与は pull_request イベントを起こさないため
+    inputs:
+      pr: { description: "PR 番号", required: true }
 permissions:
   contents: read
   pull-requests: write
 concurrency:
-  group: preview-${{ github.event.pull_request.number }}
+  group: preview-${{ inputs.pr || github.event.pull_request.number }}
   cancel-in-progress: true
 env:
-  PR: ${{ github.event.pull_request.number }}
+  PR: ${{ inputs.pr || github.event.pull_request.number }}
   FILE: deploy/preview/compose.yaml
 jobs:
-  deploy:
+  resolve: # 対象 PR の状態を API で見る (dispatch では payload に PR がない)
     if: >-
-      github.event.pull_request.head.repo.full_name == github.repository
-      && contains(github.event.pull_request.labels.*.name, 'preview')
-      && github.event.action != 'closed' && github.event.action != 'unlabeled'
-      && (github.event.action != 'labeled' || github.event.label.name == 'preview')
+      github.event_name == 'workflow_dispatch'
+      || (github.event.action != 'closed' && github.event.action != 'unlabeled'
+          && (github.event.action != 'labeled' || github.event.label.name == 'preview'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.pr.outputs.go }}
+      sha: ${{ steps.pr.outputs.sha }}
+      base: ${{ steps.pr.outputs.base }}
+    steps:
+      - id: pr
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json headRefOid,baseRefName,isCrossRepository,state,labels > pr.json
+          jq -r '"sha=\(.headRefOid)", "base=\(.baseRefName)"' pr.json >> "$GITHUB_OUTPUT"
+          if jq -e '.state == "OPEN" and .isCrossRepository == false and any(.labels[]; .name == "preview")' pr.json >/dev/null; then
+            echo go=1 >> "$GITHUB_OUTPUT"
+          else
+            echo "PR $PR is closed, from a fork, or has no 'preview' label: nothing to deploy"
+          fi
+
+  deploy:
+    needs: resolve
+    if: needs.resolve.outputs.go == '1'
     runs-on: [self-hosted, preview]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 } # base を取り出すため。ref 未指定 = PR のマージ結果
+        with: { ref: "refs/pull/${{ env.PR }}/merge", fetch-depth: 0 } # PR のマージ結果。fetch-depth 0 は base を取り出すため
       - name: Pin deploy config to the base branch # PR 側が compose を書き換えてホストを触るのを防ぐ
-        run: git checkout "origin/${{ github.base_ref }}" -- deploy/preview
+        run: git checkout "origin/${{ needs.resolve.outputs.base }}" -- deploy/preview
       - name: Check host prerequisites and secrets
         env:
           TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
@@ -71,23 +94,25 @@ jobs:
         env:
           URL: ${{ steps.up.outputs.url }}
           OK: ${{ steps.up.outcome }}
+          SHA: ${{ needs.resolve.outputs.sha }}
         with:
           script: |
             const marker = '<!-- orchat-preview -->'
             const ok = process.env.OK === 'success'
+            const issue_number = Number(process.env.PR)
             const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
             const body = [marker,
               ok ? `### プレビュー環境: ${process.env.URL}` : '### プレビュー環境: **起動に失敗**',
               '',
-              `commit \`${context.payload.pull_request.head.sha.slice(0, 7)}\` / ${new Date().toISOString()} / [run](${run})`,
+              `commit \`${process.env.SHA.slice(0, 7)}\` / ${new Date().toISOString()} / [run](${run})`,
               '',
               ok ? 'tailnet 内からのみ到達可能。自動ログイン済み (DEV_USER)、DB は PR ごとの空 Postgres。'
                  : 'ログは run を参照。`preview` ラベルを外すと撤去します。',
             ].join('\n')
-            const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number: context.issue.number, per_page: 100 })
+            const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number, per_page: 100 })
             const prev = comments.find((c) => c.body?.startsWith(marker))
             prev ? await github.rest.issues.updateComment({ ...context.repo, comment_id: prev.id, body })
-                 : await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body })
+                 : await github.rest.issues.createComment({ ...context.repo, issue_number, body })
 
   down:
     if: >-

@@ -64,6 +64,9 @@ sudo usermod -aG docker <runner-user>
 
 ## 運用メモ
 
+- **AI PR** — `ai-implement` が作る Draft PR には `preview` ラベルが付く。ただし GITHUB_TOKEN による push / ラベル付与からは
+  `pull_request` イベントが発火しないため、ai-implement は push 後に `gh workflow run preview.yml -f pr=<N>` で起動する
+  (`workflow_dispatch` は GITHUB_TOKEN 起点でも動く)。人が手で再デプロイしたいときも同じコマンドで良い。
 - **再デプロイ** — PR に push すると `app` だけ作り直される。`ts` は設定が変わらない限り再作成されないので、
   ノード identity と取得済みの TLS 証明書を維持する。ここを毎回作り直すと Let's Encrypt の
   「同一ホスト名の重複発行は週 5 回まで」に当たるため、`ts` の再作成は避けること。
