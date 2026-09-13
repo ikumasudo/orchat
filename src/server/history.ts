@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm'
 import { db, schema } from './db/index.js'
-import { escapeLike, snippet } from '../shared/search.js'
+import { escapeLike, snippet, ymd } from '../shared/search.js'
 import { itemText } from '../shared/responses.js'
 import type { AssistantBody, DbMessage, UserBody } from '../shared/types.js'
 import { transcript } from './tree.js'
@@ -32,8 +32,17 @@ export function searchConversations(userId: string, q: string, opts: { exclude?:
     .limit(opts.limit ?? 50)
 }
 
+// 直近の会話 (この会話以外、無題は除く)。instructions に「最近の関心」として渡す
+export function recentConversations(userId: string, exclude: string, limit = 10) {
+  return db
+    .select({ id: conversations.id, title: conversations.title, updatedAt: conversations.updatedAt })
+    .from(conversations)
+    .where(and(eq(conversations.userId, userId), ne(conversations.id, exclude), ne(conversations.title, '')))
+    .orderBy(desc(conversations.updatedAt))
+    .limit(limit)
+}
+
 const bodyText = (r: DbMessage) => (r.role === 'user' ? [r.body as UserBody] : (r.body as AssistantBody).output).filter((it) => it?.type === 'message').map(itemText).join(' ')
-const ymd = (d: Date) => d.toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })
 
 // 過去の会話をモデルが自分で検索して読むための function tool。読み取り専用なので承認なし
 export function historyTools(userId: string, currentConversationId: string): AppTool[] {
