@@ -69,6 +69,7 @@ docker compose up -d      # 公開イメージ ghcr.io/ikumasudo/orchat:latest �
 | `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_AUTH_SECRET` / `OIDC_SCOPES` | OIDC。`OIDC_AUTH_SECRET` は 32 文字以上のランダム文字列 |
 | `OIDC_AUTH_EXTERNAL_URL` / `OIDC_REDIRECT_URI` | リバースプロキシ・dev サーバー配下での公開 URL |
 | `MODELS` | 表示するモデル id のカンマ区切り。空なら全モデル |
+| `TITLE_MODEL` | チャットタイトルの生成に使うモデル。空なら `openrouter/auto` (安価な帯に自動ルーティング、`MODELS` とは独立) |
 | `ADMIN_EMAILS` | `/usage` で全員分を見られるユーザー (カンマ区切り) |
 | `DEV_USER` | 開発時のみ。OIDC をスキップしてこのメールでログイン (production では無効) |
 
