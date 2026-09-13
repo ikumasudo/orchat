@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { escapeLike } from '../src/shared/search.ts'
+import { escapeLike, snippet } from '../src/shared/search.ts'
 
 test('LIKE の特殊文字をエスケープする', () => {
   assert.equal(escapeLike('100%確実_テスト\\おわり'), '100\\%確実\\_テスト\\\\おわり')
@@ -14,4 +14,19 @@ test('エスケープ後は % と _ を含めてもパターン断片として�
     assert.match(pat, /^%.*%$/)
     assert.ok(!/(?<!\\)[%_]/.test(pat.slice(1, -1)))
   }
+})
+
+test('snippet: 一致位置の前後を切り出し、切れた側に … を付ける', () => {
+  const text = 'a'.repeat(300) + 'ズッキーニ' + 'b'.repeat(300)
+  const s = snippet(text, 'ずっきーに'.replace('ずっきーに', 'ズッキーニ'), 60)
+  assert.equal(s.length, 62)
+  assert.ok(s.startsWith('…') && s.endsWith('…'))
+  assert.ok(s.includes('ズッキーニ'))
+  assert.equal(s.indexOf('ズッキーニ'), 21) // 前に len/3 = 20 文字 + '…'
+})
+
+test('snippet: 一致なし・短文・大文字小文字無視・空白畳み込み', () => {
+  assert.equal(snippet('short  text\n\nhere', 'なし', 160), 'short text here')
+  assert.equal(snippet('x'.repeat(50) + 'World', 'WORLD', 10), '…xxxxxWorld')
+  assert.equal(snippet('x'.repeat(100), '', 10), 'x'.repeat(10) + '…')
 })

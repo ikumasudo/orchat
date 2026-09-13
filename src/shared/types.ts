@@ -10,11 +10,15 @@ export const serverTools = [
   { id: 'openrouter:datetime', label: '日時', icon: '🕒' },
 ] as const
 export type ServerToolId = (typeof serverTools)[number]['id']
+// アプリ側で実行する function tool のトグル (server tools と同じ ChatSettings.tools に入る)
+export const appTools = [{ id: 'app:history', label: '過去のチャット', icon: '🗂️' }] as const
+export const toolOptions = [...serverTools, ...appTools]
+export type ToolId = (typeof toolOptions)[number]['id']
 
 export const chatSettings = z.object({
   model: z.string().min(1),
   reasoning: z.object({ effort: z.enum(reasoningEfforts) }).optional(),
-  tools: z.array(z.enum(serverTools.map((t) => t.id) as [ServerToolId, ...ServerToolId[]])).optional(),
+  tools: z.array(z.enum(toolOptions.map((t) => t.id) as [ToolId, ...ToolId[]])).optional(),
 })
 export type ChatSettings = z.infer<typeof chatSettings>
 

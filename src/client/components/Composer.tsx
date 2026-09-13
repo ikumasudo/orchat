@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { BrainIcon, CheckIcon, ChevronDownIcon, ClockIcon, FileTextIcon, GlobeIcon, ImageIcon, LinkIcon, PaperclipIcon, PlusIcon, TerminalIcon, XIcon } from 'lucide-react'
+import { BrainIcon, CheckIcon, ChevronDownIcon, ClockIcon, FileTextIcon, GlobeIcon, HistoryIcon, ImageIcon, LinkIcon, PaperclipIcon, PlusIcon, TerminalIcon, XIcon } from 'lucide-react'
 import { client, orpc } from '@/lib/orpc'
-import { reasoningEfforts, serverTools, type ChatSettings, type ORModel, type UserPart } from '../../shared/types.js'
+import { reasoningEfforts, toolOptions, type ChatSettings, type ORModel, type UserPart } from '../../shared/types.js'
 import {
   PromptInput,
   PromptInputAttachment,
@@ -50,6 +50,7 @@ const toolIcons: Record<string, typeof GlobeIcon> = {
   'openrouter:web_fetch': LinkIcon,
   'openrouter:shell': TerminalIcon,
   'openrouter:datetime': ClockIcon,
+  'app:history': HistoryIcon,
 }
 const perM = (v?: string) => (v == null ? '' : `$${(Number(v) * 1e6).toFixed(2)}`)
 
@@ -142,7 +143,7 @@ export function Composer({ settings, onSettings, busy, editing, onCancelEdit, on
             <PromptInputTools className="min-w-0 flex-wrap">
               <PlusMenu settings={settings} set={set} canAttach={!!accept} canReason={supports('reasoning')} canTool={supports('tools')} />
               {supports('tools') &&
-                serverTools
+                toolOptions
                   .filter((t) => settings.tools?.includes(t.id))
                   .map((t) => {
                     const Icon = toolIcons[t.id] ?? GlobeIcon
@@ -196,7 +197,7 @@ function PlusMenu({ settings, set, canAttach, canReason, canTool }: { settings: 
         {canTool && (
           <>
             <DropdownMenuSeparator />
-            {serverTools.map((t) => {
+            {toolOptions.map((t) => {
               const Icon = toolIcons[t.id] ?? GlobeIcon
               const on = settings.tools?.includes(t.id) ?? false
               return (
