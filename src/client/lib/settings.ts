@@ -1,7 +1,7 @@
 import type { ChatSettings } from '../../shared/types.js'
 
 const KEY = 'orchat.settings'
-export const DEFAULT_SETTINGS: ChatSettings = { model: 'anthropic/claude-sonnet-4.5', tools: ['app:history'] }
+export const DEFAULT_SETTINGS: ChatSettings = { model: 'openrouter/auto', tools: ['app:history'] }
 
 export function loadSettings(): ChatSettings {
   try {

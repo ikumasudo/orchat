@@ -60,13 +60,24 @@ export async function* sseData(stream: ReadableStream<Uint8Array>): AsyncGenerat
   }
 }
 
+export const AUTO_MODEL = 'openrouter/auto'
+// MODELS env (カンマ区切り)。ピッカーの表示と Auto Router の行き先の両方に使う
+export const allowedModels = () => (process.env.MODELS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+
+// openrouter/auto のとき: 行き先を allow (auto 自身を除く) に限定し、effort 未指定なら high。それ以外のモデルは素通し
+export function autoRouter<T extends { model: string; reasoning?: { effort: string } }>(body: T, allow: string[]): T & { plugins?: unknown[] } {
+  if (body.model !== AUTO_MODEL) return body
+  const allowed_models = allow.filter((m) => m !== AUTO_MODEL)
+  return { ...body, reasoning: body.reasoning ?? { effort: 'high' }, ...(allowed_models.length && { plugins: [{ id: 'auto-router', allowed_models }] }) }
+}
+
 let modelsCache: { at: number; models: ORModel[] } | undefined
 export async function listModels(): Promise<ORModel[]> {
   if (modelsCache && Date.now() - modelsCache.at < 60 * 60 * 1000) return modelsCache.models
   const res = await fetch(`${BASE}/models`, { headers: headers() })
   if (!res.ok) throw new Error(`OpenRouter /models ${res.status}`)
   let models = ((await res.json()) as { data: ORModel[] }).data
-  const allow = (process.env.MODELS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  const allow = allowedModels()
   if (allow.length) models = allow.flatMap((id) => models.filter((m) => m.id === id))
   modelsCache = { at: Date.now(), models }
   return models
