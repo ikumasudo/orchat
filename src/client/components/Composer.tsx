@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { BrainIcon, CheckIcon, ChevronDownIcon, ClockIcon, FileTextIcon, GlobeIcon, HistoryIcon, ImageIcon, LinkIcon, PaperclipIcon, PlusIcon, TerminalIcon, XIcon } from 'lucide-react'
+import { BrainIcon, ChevronDownIcon, ClockIcon, FileTextIcon, GlobeIcon, HistoryIcon, ImageIcon, LinkIcon, PaperclipIcon, PlusIcon, TerminalIcon, XIcon } from 'lucide-react'
 import { client, orpc } from '@/lib/orpc'
+import { DEFAULT_SETTINGS } from '@/lib/settings'
 import { reasoningEfforts, toolOptions, type ChatSettings, type ORModel, type UserPart } from '../../shared/types.js'
 import {
   PromptInput,
@@ -17,8 +18,6 @@ import {
   PromptInputTools,
   usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -52,7 +51,6 @@ const toolIcons: Record<string, typeof GlobeIcon> = {
   'openrouter:datetime': ClockIcon,
   'app:history': HistoryIcon,
 }
-const perM = (v?: string) => (v == null ? '' : `$${(Number(v) * 1e6).toFixed(2)}`)
 
 export function Composer({ settings, onSettings, busy, editing, onCancelEdit, onSend, onStop }: Props) {
   const [text, setText] = useState('')
@@ -273,48 +271,30 @@ function AttachmentsHeader({ show, editing, onCancelEdit, kept, onRemoveKept }: 
   )
 }
 
+// MODELS が 3 件程度の前提で検索・グループなしの 1 段リスト。openrouter/auto は「自動」で先頭固定
+const modelLabel = (m: ORModel) => (m.id === DEFAULT_SETTINGS.model ? '自動' : (m.name.split(':').pop() ?? m.name).trim())
+
 function ModelPicker({ models, value, onChange }: { models: ORModel[]; value: string; onChange: (id: string) => void }) {
-  const [open, setOpen] = useState(false)
+  const sorted = [...models].sort((a, b) => Number(b.id === DEFAULT_SETTINGS.model) - Number(a.id === DEFAULT_SETTINGS.model))
   const current = models.find((m) => m.id === value)
-  const groups = Object.entries(Object.groupBy(models, (m) => (m.name.includes(':') ? m.name.split(':')[0].trim() : m.id.split('/')[0])))
+  const label = current ? modelLabel(current) : value
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <PromptInputButton size="sm" className="h-8 max-w-40 px-2 text-xs text-muted-foreground hover:text-foreground sm:max-w-56" aria-label="モデルを選ぶ" title={current?.name ?? value}>
-          <span className="truncate">{current?.name ?? value}</span>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <PromptInputButton size="sm" className="h-8 max-w-40 px-2 text-xs text-muted-foreground hover:text-foreground sm:max-w-56" aria-label="モデルを選ぶ" title={label}>
+          <span className="truncate">{label}</span>
           <ChevronDownIcon className="size-3.5 shrink-0 opacity-60" />
         </PromptInputButton>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-[22rem] p-0">
-        <Command filter={(value, search) => (value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}>
-          <CommandInput placeholder="モデルを検索" />
-          <CommandList className="max-h-80">
-            <CommandEmpty>見つかりません</CommandEmpty>
-            {groups.map(([g, ms]) => (
-              <CommandGroup key={g} heading={g}>
-                {ms!.map((m) => (
-                  <CommandItem
-                    key={m.id}
-                    value={`${m.name} ${m.id}`}
-                    onSelect={() => {
-                      onChange(m.id)
-                      setOpen(false)
-                    }}
-                  >
-                    <span className="truncate">{m.name}</span>
-                    {m.pricing && Number(m.pricing.prompt) >= 0 && ( /* openrouter/auto は価格が -1 (ルーティング先次第) なので隠す */
-                      <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
-                        {perM(m.pricing.prompt)}/{perM(m.pricing.completion)}
-                      </span>
-                    )}
-                    {m.id === value && <CheckIcon className="size-4 shrink-0 text-primary" />}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            ))}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
+          {sorted.map((m) => (
+            <DropdownMenuRadioItem key={m.id} value={m.id}>
+              {modelLabel(m)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

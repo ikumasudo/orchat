@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { client, orpc } from '../lib/orpc.js'
-import { loadSettings, saveSettings } from '../lib/settings.js'
+import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '../lib/settings.js'
 import { applyEvent, initialState } from '../../shared/responses.js'
 import type { ChatSettings, DbMessage, Item, UserBody, UserPart } from '../../shared/types.js'
 import { MessageList } from '../components/MessageList.js'
@@ -14,6 +14,7 @@ export function Chat({ id }: { id?: string }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const conv = useQuery({ ...orpc.conversations.get.queryOptions({ input: { id: id! } }), enabled: !!id })
+  const models = useQuery(orpc.models.list.queryOptions())
   const [settings, setSettings] = useState<ChatSettings>(loadSettings)
   const [streaming, setStreaming] = useState<Streaming | null>(null)
   const [pending, setPending] = useState<DbMessage[]>([]) // ストリーム中に追加された user message (再取得前の表示用)
@@ -30,6 +31,13 @@ export function Chat({ id }: { id?: string }) {
   useEffect(() => {
     if (conv.data) setSettings(conv.data.conversation.settings)
   }, [conv.data?.conversation.id])
+
+  // localStorage / 会話に残った旧モデル id (MODELS 外) は既定 (openrouter/auto) に倒す。
+  // 既存会話では上の effect で会話の設定を採用した直後 (settings がその同じオブジェクト) だけ判定し、届く前の localStorage 値で会話を上書きしない
+  useEffect(() => {
+    if (!models.data || (id && settings !== conv.data?.conversation.settings)) return
+    if (!models.data.some((m) => m.id === settings.model)) updateSettings({ ...settings, model: DEFAULT_SETTINGS.model })
+  }, [models.data, settings])
 
   // サーバー側で生成が進行中なら (リロード / 別タブ / 離脱からの復帰) 途中から接続する
   useEffect(() => {
