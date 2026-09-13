@@ -6,7 +6,8 @@ import type { User } from './auth.js'
 import { chatSettings, serverTools, userPart, type AssistantBody, type ChatSettings, type DbMessage, type Item, type ResponseEvent, type UserBody, type UserPart } from '../shared/types.js'
 import { listModels, responsesStream } from './openrouter.js'
 import { deepestLeaf, pathToRoot, siblings } from './tree.js'
-import { historyTools, searchConversations } from './history.js'
+import { historyTools, recentConversations, searchConversations } from './history.js'
+import { recentChatsPrompt } from '../shared/search.js'
 import { createRun, runs, type Run } from './runs.js'
 import { resolveTools, runTurn, toFunctionTool, toInputItem, type AppTool } from './tools.js'
 
@@ -151,6 +152,9 @@ const messagesRouter = {
       const s = input.settings
       const useHistory = !!s.tools?.includes('app:history')
       const appTools = [...(await resolveTools(s, context.user.id)), ...(useHistory ? historyTools(context.user.id, conv.id) : [])]
+      // 直近の会話をモデルに見せる。検索は自発的に起きにくいので、まず一覧で「最近の関心」を渡す
+      // ponytail: 10 件・タイトルは先頭 50 文字のまま。トークンが気になれば件数を減らす、ヒントとして弱ければ LLM でタイトル生成
+      const recent = useHistory ? await recentConversations(context.user.id, conv.id) : []
       const tools = [
         ...serverTools.filter((t) => s.tools?.includes(t.id)).map((t) => ('parameters' in t ? { type: t.id, parameters: t.parameters } : { type: t.id })),
         ...appTools.map(toFunctionTool),
@@ -161,8 +165,8 @@ const messagesRouter = {
         model: s.model,
         instructions: [
           `今日の日付は ${today} (JST) です。`,
-          // ツール description だけだと「前に聞いた」と言われたときしか動かないので、自発的に使うよう明示する
-          useHistory && 'ユーザーが明示しなくても、以前の相談の続きやユーザー固有の事情・好みが関係しそうな話題なら、まず search_past_chats で過去のチャットを確認してから答えてください。',
+          // ツール description だけだと「前に聞いた」と言われたときしか動かないので、一覧と共に自発的に使うよう明示する
+          useHistory && (recentChatsPrompt(recent) || 'ユーザーが明示しなくても、以前の相談の続きやユーザー固有の事情・好みが関係しそうな話題なら、まず search_past_chats で過去のチャットを確認してから答えてください。'),
         ]
           .filter(Boolean)
           .join('\n'),

@@ -11,3 +11,15 @@ export function snippet(text: string, q: string, len = 160): string {
   const s = t.slice(start, start + len)
   return (start > 0 ? '…' : '') + s + (start + len < t.length ? '…' : '')
 }
+
+export const ymd = (d: Date) => d.toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' })
+
+// 直近の会話一覧を instructions 用の文にする。search_past_chats の出力と同じ「id | タイトル | 日付」形式
+export function recentChatsPrompt(rows: { id: string; title: string; updatedAt: Date }[]): string {
+  if (!rows.length) return ''
+  return [
+    'ユーザーの最近のチャット (新しい順、id | タイトル | 更新日):',
+    ...rows.map((r) => `${r.id} | ${r.title || '(無題)'} | ${ymd(r.updatedAt)}`),
+    '関係しそうな話題ならまず read_past_chat で該当会話を読んでから答えてください。ここに無くても以前の相談やユーザー固有の事情・好みが関係しそうなら search_past_chats で探してください。',
+  ].join('\n')
+}
