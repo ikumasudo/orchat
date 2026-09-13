@@ -86,7 +86,7 @@ export function Composer({ settings, onSettings, busy, editing, onCancelEdit, on
       const uploaded: Attached[] = []
       for (const f of msg.files) {
         const blob = await (await fetch(f.url)).blob()
-        const file = new File([blob], f.filename ?? 'file', { type: f.mediaType || blob.type })
+        const file = new File([blob], f.filename || 'file', { type: f.mediaType || blob.type })
         const { ref } = await client.attachments.upload({ file })
         uploaded.push({ ref, name: file.name, mime: file.type })
       }
@@ -112,11 +112,21 @@ export function Composer({ settings, onSettings, busy, editing, onCancelEdit, on
         {error && <p className="mb-2 px-1 text-xs text-destructive">添付のアップロードに失敗しました: {error}</p>}
         <PromptInput
           onSubmit={submit}
-          accept={accept || undefined}
+          accept={accept || 'application/x-unsupported'}
           multiple
           globalDrop
           maxFileSize={20 * 1024 * 1024}
-          onError={(e) => setError(e.message)}
+          onError={(e) =>
+            setError(
+              e.code === 'max_file_size'
+                ? 'ファイルサイズが大きすぎます（20MB以下にしてください）'
+                : e.code === 'max_files'
+                  ? '添付できるファイル数の上限を超えています'
+                  : accept
+                    ? 'このファイル形式には対応していません'
+                    : 'このモデルは画像・PDFの添付に対応していません',
+            )
+          }
           className="rounded-2xl bg-card shadow-lg shadow-black/[0.04] dark:shadow-black/40 [&>[data-slot=input-group]]:rounded-2xl"
         >
           <AttachmentsHeader show={showHeader} editing={!!editing} onCancelEdit={cancelEdit} kept={kept} onRemoveKept={(a) => setKept(kept.filter((x) => x !== a))} />
