@@ -1,5 +1,12 @@
 # orchat
 
+[![ci](https://github.com/ikumasudo/orchat/actions/workflows/ci.yml/badge.svg)](https://github.com/ikumasudo/orchat/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+Self-hosted team chat UI for [OpenRouter](https://openrouter.ai), built on the **Responses API**: reasoning streams, OpenRouter server tools (web search / fetch / shell), branching, attachments, per-message cost tracking, and Entra ID (OIDC) SSO. Hono + oRPC + Drizzle/Postgres on the server, React + Vite + TanStack on the client, shipped as a single container (`ghcr.io/ikumasudo/orchat`).
+Documentation below is in Japanese.
+
+---
+
 OpenRouter 前提の社内チャット。OpenRouter **Responses API** (`/api/v1/responses`) の input/output items を抽象化せずそのまま通し、そのまま保存する。
 
 - reasoning (thinking) のストリーム表示と会話往復での保持 (reasoning item を署名/暗号化ごと保存・返送)
@@ -39,7 +46,8 @@ pnpm dev                                          # dev script が NODE_EXTRA_CA
 
 ```sh
 cp .env.example .env      # OIDC_* と OPENROUTER_API_KEY を設定、DEV_USER は空に
-docker compose up -d --build
+docker compose up -d           # 公開イメージ ghcr.io/ikumasudo/orchat:latest を pull
+docker compose up -d --build   # 自分でビルドする場合
 ```
 
 Entra ID 側: アプリ登録 → リダイレクト URI `https://<BASE_URL>/callback`、クライアントシークレット発行。
@@ -54,3 +62,7 @@ Entra ID 側: アプリ登録 → リダイレクト URI `https://<BASE_URL>/cal
 | `MODELS` | 表示するモデル id のカンマ区切り。空なら全モデル |
 | `ADMIN_EMAILS` | `/usage` で全員分を見られるユーザー |
 | `DEV_USER` | 開発時のみ。OIDC をスキップしてこのメールでログイン (production では無効) |
+
+## License
+
+MIT
