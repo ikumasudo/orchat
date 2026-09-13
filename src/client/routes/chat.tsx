@@ -72,6 +72,7 @@ export function Chat({ id }: { id?: string }) {
     setStreaming({ conversationId, parentId, output: [] }) // send の往復中も busy 表示にする
     try {
       const r = await client.messages.send({ conversationId, parentId, content, settings })
+      qc.invalidateQueries({ queryKey: orpc.conversations.list.key() }) // タイトルと updatedAt が確定した時点で一覧に出す (ストリーム終了を待たない)
       if (r.message) setPending((p) => [...p, r.message!])
       await attach(conversationId, r.parentId)
     } catch (e) {
