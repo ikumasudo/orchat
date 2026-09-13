@@ -55,7 +55,7 @@ jobs:
           else
             printf 'MODE=new\nN=%s\nPR=\nBRANCH=ai/issue-%s\nREF=%s\n' "$N" "$N" "$GITHUB_REF" >> "$GITHUB_ENV"
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { ref: "${{ env.REF }}", persist-credentials: false, fetch-depth: 0 } # the agent container sees .git; keep the token out of it
       - name: Merge main into the PR branch (followup) # conflicts are left as markers for the agent to resolve
         if: env.MODE == 'followup'
