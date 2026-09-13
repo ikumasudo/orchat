@@ -1,4 +1,5 @@
-import type { ORModel, ResponseEvent } from '../shared/types.js'
+import type { Item, ORModel, ResponseEvent } from '../shared/types.js'
+import { itemText } from '../shared/responses.js'
 
 const BASE = 'https://openrouter.ai/api/v1'
 const headers = () => ({
@@ -26,6 +27,17 @@ export async function* responsesStream(body: Record<string, unknown>, signal?: A
     }
     yield ev
   }
+}
+
+// 非ストリームで呼び、output の message テキストだけ返す (reasoning item は捨てる)
+export async function responsesText(body: Record<string, unknown>): Promise<string> {
+  const res = await fetch(`${BASE}/responses`, { method: 'POST', headers: headers(), body: JSON.stringify(body) })
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${await res.text()}`)
+  const r = (await res.json()) as { output: Item[]; status?: string; incomplete_details?: { reason?: string } }
+  const text = r.output.filter((it) => it.type === 'message').map(itemText).join('')
+  // reasoning モデルが max_output_tokens を推論で使い切ると message 無しの incomplete で返る。黙って空を返さず失敗にする
+  if (!text) throw new Error(`OpenRouter: empty output (${r.status}${r.incomplete_details?.reason ? `: ${r.incomplete_details.reason}` : ''})`)
+  return text
 }
 
 // `data: ...` 行だけを取り出す最小 SSE パーサ (コメント行 `: OPENROUTER PROCESSING` は捨てる)

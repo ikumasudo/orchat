@@ -5,6 +5,8 @@ import { db, schema } from './db/index.js'
 import type { User } from './auth.js'
 import { chatSettings, serverTools, userPart, type AssistantBody, type ChatSettings, type DbMessage, type Item, type ResponseEvent, type UserBody, type UserPart } from '../shared/types.js'
 import { allowedModels, autoRouter, listModels, responsesStream } from './openrouter.js'
+import { generateTitle } from './title.js'
+import { itemText } from '../shared/responses.js'
 import { deepestLeaf, pathToRoot, siblings } from './tree.js'
 import { historyTools, recentConversations, searchConversations } from './history.js'
 import { recentChatsPrompt } from '../shared/search.js'
@@ -94,7 +96,8 @@ async function resolveAttachments(userId: string, items: Item[]): Promise<Item[]
 const textOf = (content: UserPart[]) => content.filter((p) => p.type === 'input_text').map((p) => p.text).join('\n')
 
 // 生成本体。リクエストとは独立に走り、終わったら保存する。function tool の実行ループは runTurn
-async function generate(conversationId: string, parentId: string | null, run: Run<ResponseEvent>, body: Record<string, unknown>, s: ChatSettings, tools: AppTool[], userId: string) {
+// titleFrom: 初回送信の user テキスト。渡されたときだけ応答完了後にタイトルを LLM で付け直す (一覧は 5 秒ポーリングで拾う)
+async function generate(conversationId: string, parentId: string | null, run: Run<ResponseEvent>, body: Record<string, unknown>, s: ChatSettings, tools: AppTool[], userId: string, titleFrom?: string) {
   const state = await runTurn({ stream: responsesStream, body, tools, run, userId })
   let error = state.error
   try {
@@ -108,6 +111,10 @@ async function generate(conversationId: string, parentId: string | null, run: Ru
         .values({ conversationId, parentId, role: 'assistant', body: assistant, model: state.model ?? s.model, usage: state.usage, cost, generationId: state.id })
         .returning()
       await db.update(conversations).set({ leafId: saved.id, updatedAt: new Date() }).where(eq(conversations.id, conversationId))
+      if (titleFrom) {
+        const answer = output.filter((it) => it.type === 'message').map(itemText).join('\n')
+        generateTitle(conversationId, titleFrom, answer).catch((e) => console.error(`title ${conversationId}: ${e instanceof Error ? e.message : e}`))
+      }
     }
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
@@ -135,6 +142,7 @@ const messagesRouter = {
       if (runs.has(conv.id)) throw new ORPCError('CONFLICT', { message: '応答を生成中です' })
       let parentId = input.parentId
       let userMsg: DbMessage | undefined
+      const titleFrom = !conv.title && input.content ? textOf(input.content) : undefined // 初回送信だけ
 
       if (input.content) {
         const body: UserBody = { type: 'message', role: 'user', content: input.content }
@@ -153,7 +161,7 @@ const messagesRouter = {
       const useHistory = !!s.tools?.includes('app:history')
       const appTools = [...(await resolveTools(s, context.user.id)), ...(useHistory ? historyTools(context.user.id, conv.id) : [])]
       // 直近の会話をモデルに見せる。検索は自発的に起きにくいので、まず一覧で「最近の関心」を渡す
-      // ponytail: 10 件・タイトルは先頭 50 文字のまま。トークンが気になれば件数を減らす、ヒントとして弱ければ LLM でタイトル生成
+      // ponytail: 10 件固定。トークンが気になれば件数を減らす
       const recent = useHistory ? await recentConversations(context.user.id, conv.id) : []
       const tools = [
         ...serverTools.filter((t) => s.tools?.includes(t.id)).map((t) => ('parameters' in t ? { type: t.id, parameters: t.parameters } : { type: t.id })),
@@ -180,7 +188,7 @@ const messagesRouter = {
 
       const run = createRun<ResponseEvent>(parentId)
       runs.set(conv.id, run)
-      void generate(conv.id, parentId, run, body, s, appTools, context.user.id)
+      void generate(conv.id, parentId, run, body, s, appTools, context.user.id, titleFrom)
       return { parentId, message: userMsg }
     }),
   // 進行中の生成に接続する。バッファ済みイベントを再生してから live を流し、終わったら閉じる
