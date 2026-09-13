@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import type { Item } from '../../shared/types.js'
-import { serverTools } from '../../shared/types.js'
+import { functionLabels, serverTools } from '../../shared/types.js'
 import { client } from '../lib/orpc.js'
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from '@/components/ai-elements/tool'
 import { Button } from '@/components/ui/button'
@@ -92,7 +92,7 @@ function FunctionCallItem({ item, output, conversationId }: { item: Item; output
   }
   return (
     <Tool className="mb-2 bg-card/60" defaultOpen={pending}>
-      <ToolHeader type={`tool-${item.name ?? 'function'}`} state={state} title={item.name ?? 'ツール'} />
+      <ToolHeader type={`tool-${item.name ?? 'function'}`} state={state} title={functionLabels[item.name ?? ''] ?? item.name ?? 'ツール'} />
       <ToolContent>
         <ToolInput input={parseArgs(item.arguments)} />
         {pending && conversationId && (

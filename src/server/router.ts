@@ -149,7 +149,8 @@ const messagesRouter = {
       const inputItems = (await resolveAttachments(context.user.id, history)).map(toInputItem)
 
       const s = input.settings
-      const appTools = [...(await resolveTools(s, context.user.id)), ...(s.tools?.includes('app:history') ? historyTools(context.user.id, conv.id) : [])]
+      const useHistory = !!s.tools?.includes('app:history')
+      const appTools = [...(await resolveTools(s, context.user.id)), ...(useHistory ? historyTools(context.user.id, conv.id) : [])]
       const tools = [
         ...serverTools.filter((t) => s.tools?.includes(t.id)).map((t) => ('parameters' in t ? { type: t.id, parameters: t.parameters } : { type: t.id })),
         ...appTools.map(toFunctionTool),
@@ -158,7 +159,13 @@ const messagesRouter = {
       const today = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' })
       const body: Record<string, unknown> = {
         model: s.model,
-        instructions: `今日の日付は ${today} (JST) です。`,
+        instructions: [
+          `今日の日付は ${today} (JST) です。`,
+          // ツール description だけだと「前に聞いた」と言われたときしか動かないので、自発的に使うよう明示する
+          useHistory && 'ユーザーが明示しなくても、以前の相談の続きやユーザー固有の事情・好みが関係しそうな話題なら、まず search_past_chats で過去のチャットを確認してから答えてください。',
+        ]
+          .filter(Boolean)
+          .join('\n'),
         input: inputItems,
         ...(s.reasoning && { reasoning: s.reasoning }),
         ...(tools.length && { tools }),

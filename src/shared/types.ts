@@ -13,6 +13,8 @@ export type ServerToolId = (typeof serverTools)[number]['id']
 // アプリ側で実行する function tool のトグル (server tools と同じ ChatSettings.tools に入る)
 export const appTools = [{ id: 'app:history', label: '過去のチャット', icon: '🗂️' }] as const
 export const toolOptions = [...serverTools, ...appTools]
+// function tool 名 → 表示名 (ステップ見出し / ToolItem)
+export const functionLabels: Record<string, string> = { search_past_chats: '過去のチャットを検索', read_past_chat: '過去のチャットを読む' }
 export type ToolId = (typeof toolOptions)[number]['id']
 
 export const chatSettings = z.object({
