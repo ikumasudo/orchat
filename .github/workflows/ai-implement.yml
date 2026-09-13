@@ -170,7 +170,7 @@ jobs:
           git fetch "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" main
           git merge --no-ff -m "Merge main into $BRANCH" FETCH_HEAD \
             || { git merge --abort; echo "CONFLICT=1" >> "$GITHUB_ENV"; } # nobody left to resolve it: ship as-is, ask for /ai
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: env.MODE != 'plan'
         with: { version: 10 }
       - uses: actions/setup-node@v4
