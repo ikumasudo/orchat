@@ -5,10 +5,10 @@ import { db, schema } from './db/index.js'
 import type { User } from './auth.js'
 import { chatSettings, serverTools, userPart, type AssistantBody, type ChatSettings, type DbMessage, type Item, type ResponseEvent, type UserBody, type UserPart } from '../shared/types.js'
 import { listModels, responsesStream } from './openrouter.js'
-import { applyEvent, initialState } from '../shared/responses.js'
 import { deepestLeaf, pathToRoot, siblings } from './tree.js'
 import { escapeLike } from '../shared/search.js'
 import { createRun, runs, type Run } from './runs.js'
+import { resolveTools, runTurn, toFunctionTool, toInputItem, type AppTool } from './tools.js'
 
 const base = os.$context<{ user: User }>()
 const { conversations, messages, attachments, users } = schema
@@ -112,19 +112,10 @@ async function resolveAttachments(userId: string, items: Item[]): Promise<Item[]
 
 const textOf = (content: UserPart[]) => content.filter((p) => p.type === 'input_text').map((p) => p.text).join('\n')
 
-// 生成本体。リクエストとは独立に走り、終わったら保存する
-async function generate(conversationId: string, parentId: string | null, run: Run<ResponseEvent>, body: Record<string, unknown>, s: ChatSettings) {
-  const state = initialState()
-  let error: string | undefined
-  try {
-    for await (const event of responsesStream(body, run.abort.signal)) {
-      applyEvent(state, event)
-      run.push(event)
-    }
-  } catch (e) {
-    // 途中エラー / 停止でも生成済み部分は保存する
-    error = run.abort.signal.aborted ? '停止しました' : e instanceof Error ? e.message : String(e)
-  }
+// 生成本体。リクエストとは独立に走り、終わったら保存する。function tool の実行ループは runTurn
+async function generate(conversationId: string, parentId: string | null, run: Run<ResponseEvent>, body: Record<string, unknown>, s: ChatSettings, tools: AppTool[], userId: string) {
+  const state = await runTurn({ stream: responsesStream, body, tools, run, userId })
+  let error = state.error
   try {
     // 何も生成されずに失敗したときは assistant を保存しない (次ターンの履歴に空メッセージが混ざるのを防ぐ)
     const output = state.output.filter(Boolean)
@@ -175,10 +166,14 @@ const messagesRouter = {
       // 履歴 = user message item + assistant の output items をそのまま並べる (reasoning / server tool の item も含めて返送する)
       const rows = (await db.query.messages.findMany({ where: eq(messages.conversationId, conv.id) })) as DbMessage[]
       const history = pathToRoot(rows, parentId).flatMap((r) => (r.role === 'user' ? [r.body as Item] : (r.body as AssistantBody).output))
-      const inputItems = await resolveAttachments(context.user.id, history)
+      const inputItems = (await resolveAttachments(context.user.id, history)).map(toInputItem)
 
       const s = input.settings
-      const tools = serverTools.filter((t) => s.tools?.includes(t.id)).map((t) => ('parameters' in t ? { type: t.id, parameters: t.parameters } : { type: t.id }))
+      const appTools = await resolveTools(s, context.user.id)
+      const tools = [
+        ...serverTools.filter((t) => s.tools?.includes(t.id)).map((t) => ('parameters' in t ? { type: t.id, parameters: t.parameters } : { type: t.id })),
+        ...appTools.map(toFunctionTool),
+      ]
       // モデルは今日の日付を知らない (Web 検索の結果を「古い」と誤認する) ので送信時だけ渡す。DB には保存しない
       const today = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' })
       const body: Record<string, unknown> = {
@@ -191,7 +186,7 @@ const messagesRouter = {
 
       const run = createRun<ResponseEvent>(parentId)
       runs.set(conv.id, run)
-      void generate(conv.id, parentId, run, body, s)
+      void generate(conv.id, parentId, run, body, s, appTools, context.user.id)
       return { parentId, message: userMsg }
     }),
   // 進行中の生成に接続する。バッファ済みイベントを再生してから live を流し、終わったら閉じる
@@ -205,6 +200,13 @@ const messagesRouter = {
   stop: base.input(z.object({ conversationId: z.uuid() })).handler(async ({ context, input }) => {
     await ownConversation(context.user.id, input.conversationId)
     runs.get(input.conversationId)?.abort.abort()
+  }),
+  // 承認待ちの function_call を承認 / 拒否する
+  decide: base.input(z.object({ conversationId: z.uuid(), callId: z.string(), approved: z.boolean() })).handler(async ({ context, input }) => {
+    await ownConversation(context.user.id, input.conversationId)
+    const pending = runs.get(input.conversationId)?.pending.get(input.callId)
+    if (!pending) throw new ORPCError('NOT_FOUND', { message: '承認待ちのツール呼び出しがありません' })
+    pending.resolve(input.approved)
   }),
 }
 

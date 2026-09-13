@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import { sseData } from '../src/server/openrouter.ts'
-import { applyEvent, initialState, itemText, splitStepsAnswer } from '../src/shared/responses.ts'
+import { addUsage, applyEvent, initialState, itemDone, itemText, offsetEvent, splitStepsAnswer } from '../src/shared/responses.ts'
 import type { Item, ResponseEvent } from '../src/shared/types.ts'
 
 test('applyEvent builds items from added/delta/annotation events', () => {
@@ -54,6 +54,58 @@ test('splitStepsAnswer: ストリーミング中の境界移動', () => {
   // 最終回答が来たら末尾だけ回答に戻る
   out = [...out, msg('答え')]
   assert.deepEqual(splitStepsAnswer(out), { steps: [msg('Hello'), tool], answer: [msg('答え')] })
+})
+
+test('function_call_arguments.delta は output_item.done / response.completed で上書きされる (applyEvent 無変更で足りる)', () => {
+  const call: Item = { id: 'fc', type: 'function_call', call_id: 'c1', name: 'f', arguments: '{"a":1}', status: 'completed' }
+  const s = initialState()
+  ;[
+    { type: 'response.output_item.added', output_index: 0, item: { id: 'fc', type: 'function_call', call_id: 'c1', name: 'f', arguments: '' } },
+    { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"a"' },
+    { type: 'response.function_call_arguments.delta', output_index: 0, delta: ':1}' },
+    { type: 'response.output_item.done', output_index: 0, item: call },
+  ].forEach((e) => applyEvent(s, e as ResponseEvent))
+  assert.deepEqual(s.output[0], call)
+  applyEvent(s, { type: 'response.completed', response: { output: [call] } })
+  assert.deepEqual(s.output, [call])
+})
+
+test('addUsage: 数値は合算、片方だけなら残す、ネストは再帰', () => {
+  assert.equal(addUsage(undefined, undefined), undefined)
+  assert.deepEqual(addUsage(undefined, { input_tokens: 1 }), { input_tokens: 1 })
+  assert.deepEqual(
+    addUsage({ input_tokens: 10, output_tokens: 5, cost: 0.1, output_tokens_details: { reasoning_tokens: 2 } }, { input_tokens: 20, cost: 0.2, output_tokens_details: { reasoning_tokens: 3 }, server_tool_use_details: { web_search_requests: 1 } }),
+    { input_tokens: 30, output_tokens: 5, cost: 0.30000000000000004, output_tokens_details: { reasoning_tokens: 5 }, server_tool_use_details: { web_search_requests: 1 } },
+  )
+})
+
+test('offsetEvent: output_index をずらし、completed は前回 output と連結・usage 合算。purely functional', () => {
+  const prev = { output: [{ type: 'message' }, { type: 'function_call' }, { type: 'function_call_output' }] as Item[], usage: { input_tokens: 1, cost: 1 } }
+  const delta: ResponseEvent = { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: 'x' }
+  assert.equal(offsetEvent(delta, 3, prev).output_index, 3)
+  assert.equal(delta.output_index, 0)
+  const created: ResponseEvent = { type: 'response.created', response: { id: 'r2' } }
+  assert.equal(offsetEvent(created, 3, prev), created)
+  const done = offsetEvent({ type: 'response.completed', response: { id: 'r2', output: [{ type: 'message' }], usage: { input_tokens: 2, cost: 2 } } }, 3, prev)
+  assert.deepEqual(done.response?.output?.map((i) => i.type), ['message', 'function_call', 'function_call_output', 'message'])
+  assert.deepEqual(done.response?.usage, { input_tokens: 3, cost: 3 })
+  assert.equal(done.response?.id, 'r2')
+  // 2 リクエスト分を offsetEvent 経由で applyEvent に流すと 1 つの output に畳まれる
+  const s = initialState()
+  ;[
+    { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call', call_id: 'c' } },
+    { type: 'response.completed', response: { output: [{ type: 'function_call', call_id: 'c' }], usage: { cost: 1 } } },
+  ].forEach((e) => applyEvent(s, e as ResponseEvent))
+  applyEvent(s, itemDone(1, { type: 'function_call_output', call_id: 'c', output: 'ok' }))
+  const p2 = { output: [...s.output], usage: s.usage } // prev は前回までのスナップショット (runTurn では state と local が別なので共有されない)
+  ;[
+    { type: 'response.output_item.added', output_index: 0, item: { type: 'message', content: [] } },
+    { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: 'hi' },
+    { type: 'response.completed', response: { output: [{ type: 'message', content: [{ type: 'output_text', text: 'hi' }] }], usage: { cost: 2 } } },
+  ].forEach((e) => applyEvent(s, offsetEvent(e as ResponseEvent, 2, p2)))
+  assert.deepEqual(s.output.map((i) => i.type), ['function_call', 'function_call_output', 'message'])
+  assert.equal(itemText(s.output[2]), 'hi')
+  assert.deepEqual(s.usage, { cost: 3 })
 })
 
 test('sseData splits events and drops comments', async () => {

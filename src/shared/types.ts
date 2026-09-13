@@ -40,8 +40,13 @@ export type Item = {
   signature?: string
   action?: { type?: string; query?: string; sources?: Array<{ type?: string; url?: string }>; commands?: string[]; [k: string]: unknown }
   url?: string
-  // openrouter:shell の実行結果
-  output?: Array<{ stdout?: string; stderr?: string; outcome?: { type?: string; exit_code?: number } }>
+  // openrouter:shell の実行結果 (配列) / function_call_output の結果 (文字列)
+  output?: Array<{ stdout?: string; stderr?: string; outcome?: { type?: string; exit_code?: number } }> | string
+  // function_call / function_call_output
+  call_id?: string
+  name?: string
+  arguments?: string
+  approval?: 'pending' | 'approved' | 'denied' // アプリが付ける承認状態 (返送時に落とす)
   [k: string]: unknown
 }
 

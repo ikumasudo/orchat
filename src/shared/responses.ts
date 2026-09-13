@@ -69,3 +69,29 @@ export function splitStepsAnswer(output: Item[]): { steps: Item[]; answer: Item[
   while (i > 0 && output[i - 1]?.type === 'message') i--
   return { steps: output.slice(0, i), answer: output.slice(i) }
 }
+
+// ---- ツールループ用 (1 ターンに複数リクエストを流して 1 つの output に連結する) ----
+
+// usage の数値フィールドを合算する (両方数値なら足す、片方だけなら残す、object は再帰)
+export function addUsage(a?: Usage, b?: Usage): Usage | undefined {
+  if (!a || !b) return a ?? b
+  const out: Record<string, unknown> = { ...a }
+  for (const [k, v] of Object.entries(b)) {
+    const x = out[k]
+    out[k] = typeof x === 'number' && typeof v === 'number' ? x + v : x && v && typeof x === 'object' && typeof v === 'object' ? addUsage(x as Usage, v as Usage) : (v ?? x)
+  }
+  return out as Usage
+}
+
+// 2 回目以降のリクエストのイベントを、前回までの output の後ろに続くように書き換える。
+// applyEvent はリクエスト単位の output_index / response.completed を前提にしているので、run に push する前にこれで揃える
+export function offsetEvent(ev: ResponseEvent, base: number, prev: { output: Item[]; usage?: Usage }): ResponseEvent {
+  const out: ResponseEvent = ev.output_index != null ? { ...ev, output_index: ev.output_index + base } : ev
+  if ((ev.type === 'response.completed' || ev.type === 'response.done') && ev.response) {
+    return { ...out, response: { ...ev.response, output: prev.output.concat(ev.response.output ?? []), usage: addUsage(prev.usage, ev.response.usage) } }
+  }
+  return out
+}
+
+// アプリが作る item (function_call_output、承認状態の更新) を流すための合成イベント
+export const itemDone = (output_index: number, item: Item): ResponseEvent => ({ type: 'response.output_item.done', output_index, item })
