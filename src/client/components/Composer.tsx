@@ -302,7 +302,7 @@ function ModelPicker({ models, value, onChange }: { models: ORModel[]; value: st
                     }}
                   >
                     <span className="truncate">{m.name}</span>
-                    {m.pricing && (
+                    {m.pricing && Number(m.pricing.prompt) >= 0 && ( /* openrouter/auto は価格が -1 (ルーティング先次第) なので隠す */
                       <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
                         {perM(m.pricing.prompt)}/{perM(m.pricing.completion)}
                       </span>

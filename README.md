@@ -13,7 +13,7 @@ Self-hosted, OpenRouter-only team chat for small companies. SSO (OIDC), per-user
 - **導入が 1 コンテナ** — `docker compose up -d` (app + Postgres) だけ。イメージは `ghcr.io/ikumasudo/orchat`
 - **SSO** — OIDC (Microsoft Entra ID で動作確認済み)。社員の追加・削除は IdP 側だけで完結
 - **コストの可視化** — メッセージ単位で OpenRouter の課金額を記録し、`/usage` で月別・ユーザー別に集計
-- **使うモデルを管理者が固定** — `MODELS` に許可するモデル id を並べるだけ (空なら全モデル)
+- **使うモデルを管理者が固定** — `MODELS` に許可するモデル id を並べるだけ (空なら全モデル)。既定の `openrouter/auto` はこの一覧にだけルーティングされる
 
 ## 機能
 
@@ -68,7 +68,7 @@ docker compose up -d      # 公開イメージ ghcr.io/ikumasudo/orchat:latest �
 | `BASE_URL` | 公開 URL。OpenRouter への `HTTP-Referer` に使う |
 | `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_AUTH_SECRET` / `OIDC_SCOPES` | OIDC。`OIDC_AUTH_SECRET` は 32 文字以上のランダム文字列 |
 | `OIDC_AUTH_EXTERNAL_URL` / `OIDC_REDIRECT_URI` | リバースプロキシ・dev サーバー配下での公開 URL |
-| `MODELS` | 表示するモデル id のカンマ区切り。空なら全モデル |
+| `MODELS` | 表示するモデル id のカンマ区切り。空なら全モデル。`openrouter/auto` を選んだときの行き先もこの一覧 (auto 自身を除く) に絞られる。設定するなら `openrouter/auto` 自身も入れること |
 | `ADMIN_EMAILS` | `/usage` で全員分を見られるユーザー (カンマ区切り) |
 | `DEV_USER` | 開発時のみ。OIDC をスキップしてこのメールでログイン (production では無効) |
 

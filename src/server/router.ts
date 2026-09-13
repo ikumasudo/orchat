@@ -4,7 +4,7 @@ import { and, desc, eq, sql, gte, lt } from 'drizzle-orm'
 import { db, schema } from './db/index.js'
 import type { User } from './auth.js'
 import { chatSettings, serverTools, userPart, type AssistantBody, type ChatSettings, type DbMessage, type Item, type ResponseEvent, type UserBody, type UserPart } from '../shared/types.js'
-import { listModels, responsesStream } from './openrouter.js'
+import { allowedModels, autoRouter, listModels, responsesStream } from './openrouter.js'
 import { deepestLeaf, pathToRoot, siblings } from './tree.js'
 import { historyTools, recentConversations, searchConversations } from './history.js'
 import { recentChatsPrompt } from '../shared/search.js'
@@ -161,19 +161,22 @@ const messagesRouter = {
       ]
       // モデルは今日の日付を知らない (Web 検索の結果を「古い」と誤認する) ので送信時だけ渡す。DB には保存しない
       const today = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' })
-      const body: Record<string, unknown> = {
-        model: s.model,
-        instructions: [
-          `今日の日付は ${today} (JST) です。`,
-          // ツール description だけだと「前に聞いた」と言われたときしか動かないので、一覧と共に自発的に使うよう明示する
-          useHistory && (recentChatsPrompt(recent) || 'ユーザーが明示しなくても、以前の相談の続きやユーザー固有の事情・好みが関係しそうな話題なら、まず search_past_chats で過去のチャットを確認してから答えてください。'),
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        input: inputItems,
-        ...(s.reasoning && { reasoning: s.reasoning }),
-        ...(tools.length && { tools }),
-      }
+      const body: Record<string, unknown> = autoRouter(
+        {
+          model: s.model,
+          instructions: [
+            `今日の日付は ${today} (JST) です。`,
+            // ツール description だけだと「前に聞いた」と言われたときしか動かないので、一覧と共に自発的に使うよう明示する
+            useHistory && (recentChatsPrompt(recent) || 'ユーザーが明示しなくても、以前の相談の続きやユーザー固有の事情・好みが関係しそうな話題なら、まず search_past_chats で過去のチャットを確認してから答えてください。'),
+          ]
+            .filter(Boolean)
+            .join('\n'),
+          input: inputItems,
+          ...(s.reasoning && { reasoning: s.reasoning }),
+          ...(tools.length && { tools }),
+        },
+        allowedModels(),
+      )
 
       const run = createRun<ResponseEvent>(parentId)
       runs.set(conv.id, run)
