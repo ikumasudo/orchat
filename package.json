@@ -1,6 +1,9 @@
 {
   "name": "orchat",
+  "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "repository": "github:ikumasudo/orchat",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k \"NODE_EXTRA_CA_CERTS=dev/mock-oidc/cert.pem tsx watch src/server/index.ts\" \"vite\"",
