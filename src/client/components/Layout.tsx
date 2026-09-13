@@ -50,7 +50,8 @@ export function Layout({ children }: { children: ReactNode }) {
     return () => clearTimeout(t)
   }, [q])
   const searching = debounced !== ''
-  const listRes = useQuery(orpc.conversations.list.queryOptions())
+  // 別タブ / 別デバイスでの変更も拾う (v5 の refetchOnWindowFocus は visibilitychange しか見ないので並べたウィンドウでは効かない)
+  const listRes = useQuery({ ...orpc.conversations.list.queryOptions(), refetchInterval: 5_000 })
   const searchRes = useQuery({ ...orpc.conversations.search.queryOptions({ input: { q: debounced } }), enabled: searching })
   const convs = searching ? searchRes : listRes
   const del = useMutation(
