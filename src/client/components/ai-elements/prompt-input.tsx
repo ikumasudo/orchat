@@ -863,27 +863,48 @@ export const PromptInputTextarea = ({
   };
 
   const handlePaste: ClipboardEventHandler<HTMLTextAreaElement> = (event) => {
-    const items = event.clipboardData?.items;
+    const clipboardData = event.clipboardData;
 
-    if (!items) {
+    if (!clipboardData) {
       return;
     }
 
     const files: File[] = [];
 
-    for (const item of items) {
-      if (item.kind === "file") {
-        const file = item.getAsFile();
-        if (file) {
-          files.push(file);
+    const items = clipboardData.items;
+    if (items) {
+      for (const item of items) {
+        if (item.kind === "file") {
+          const file = item.getAsFile();
+          if (file) {
+            files.push(file);
+          }
         }
       }
     }
 
-    if (files.length > 0) {
-      event.preventDefault();
-      attachments.add(files);
+    // items が空で files にだけ入る環境のフォールバック
+    if (files.length === 0 && clipboardData.files?.length) {
+      files.push(...Array.from(clipboardData.files));
     }
+
+    if (files.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    attachments.add(
+      files.map((file) => {
+        if (file.name) {
+          return file;
+        }
+        const sub = file.type.split("/")[1]?.split("+")[0] ?? "";
+        const ext = sub === "jpeg" ? "jpg" : sub;
+        return new File([file], ext ? `pasted.${ext}` : "pasted", {
+          type: file.type,
+        });
+      })
+    );
   };
 
   const controlledProps = controller
