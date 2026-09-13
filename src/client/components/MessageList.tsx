@@ -30,7 +30,7 @@ export function MessageList({ path, siblings, streaming, onRegenerate, onEdit, o
             onSwitch={onSwitch}
           />
         ))}
-        {streaming && <Message message={{ id: 'streaming', role: 'assistant', body: { output: streaming.output } }} streaming />}
+        {streaming && <Message message={{ id: 'streaming', conversationId: streaming.conversationId, role: 'assistant', body: { output: streaming.output } }} streaming />}
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>
