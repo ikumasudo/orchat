@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { pathToRoot, siblings, deepestLeaf } from '../src/server/tree.ts'
+import { pathToRoot, siblings, deepestLeaf, transcript } from '../src/server/tree.ts'
+import type { DbMessage } from '../src/shared/types.ts'
 
 const t = (n: number) => new Date(2026, 0, n)
 //  u1 ─ a1 ─ u2 ─ a2
@@ -28,4 +29,24 @@ test('siblings groups by parent in creation order', () => {
 test('deepestLeaf follows newest child', () => {
   assert.equal(deepestLeaf(rows, 'a1'), 'a2')
   assert.equal(deepestLeaf(rows, "a1'"), "u2'")
+})
+
+test('transcript: role 行に整形し、reasoning / tool item は捨て、maxChars で切る', () => {
+  const m = (id: string, parentId: string | null, role: string, body: DbMessage['body'], n: number): DbMessage =>
+    ({ id, parentId, role, body, createdAt: t(n), conversationId: 'c', model: null, usage: null, cost: null, generationId: null })
+  const msgs = [
+    m('u1', null, 'user', { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'レシピ教えて' }] }, 1),
+    m('a1', 'u1', 'assistant', {
+      output: [
+        { type: 'reasoning', summary: [{ type: 'summary_text', text: '考え中' }] },
+        { type: 'function_call', name: 'x', call_id: '1', arguments: '{}' },
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ズッキーニの味噌漬け' }] },
+      ],
+    }, 2),
+    m("a1'", 'u1', 'assistant', { output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '別ブランチ' }] }] }, 3),
+  ]
+  assert.equal(transcript(msgs, 'a1', 1000), 'user: レシピ教えて\n\nassistant: ズッキーニの味噌漬け')
+  assert.equal(transcript(msgs, "a1'", 1000), 'user: レシピ教えて\n\nassistant: 別ブランチ')
+  assert.equal(transcript(msgs, 'a1', 10), 'user: レシピ教\n[…以下省略]')
+  assert.equal(transcript(msgs, null, 10), '')
 })

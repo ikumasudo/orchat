@@ -1,7 +1,7 @@
 import { cloneElement, createContext, isValidElement, useContext, useEffect, useRef, useState, type JSX, type ReactElement, type ReactNode } from 'react'
 import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, FileTextIcon, PencilIcon, RefreshCwIcon } from 'lucide-react'
 import type { Annotation, AssistantBody, DbMessage, Item, UserBody, UserPart } from '../../shared/types.js'
-import { serverTools } from '../../shared/types.js'
+import { functionLabels, serverTools } from '../../shared/types.js'
 import { isToolItem, itemText, splitStepsAnswer } from '../../shared/responses.js'
 import {
   Message as AiMessage,
@@ -188,7 +188,7 @@ function ActivityBlock({ steps, streaming, conversationId }: { steps: Item[]; st
 // ストリーミング中は閉じたまま現在進行中の 1 ステップだけを 1 行で見せる
 function ActiveStep({ item }: { item: Item }) {
   if (item.type === 'reasoning') return <Shimmer duration={1}>思考中…</Shimmer>
-  if (item.type === 'function_call') return <>{item.approval === 'pending' ? `承認待ち: ${item.name}` : `${item.name}: 実行中`}</>
+  if (item.type === 'function_call' && item.approval === 'pending') return <>承認待ち: {toolLabel(item)}</>
   const detail = item.action?.query ?? item.url ?? ''
   return <>{detail ? `${toolLabel(item)}: ${detail}` : `${toolLabel(item)}: 実行中`}</>
 }
@@ -231,7 +231,7 @@ function summarizeSteps(steps: Item[], seconds?: number) {
 }
 
 const toolLabel = (item: Item) =>
-  serverTools.find((t) => t.id === item.type)?.label ?? (item.type === 'function_call' ? (item.name ?? 'ツール') : /search/.test(item.type) ? 'Web検索' : item.type.replace(/^openrouter:/, ''))
+  serverTools.find((t) => t.id === item.type)?.label ?? (item.type === 'function_call' ? (functionLabels[item.name ?? ''] ?? item.name ?? 'ツール') : /search/.test(item.type) ? 'Web検索' : item.type.replace(/^openrouter:/, ''))
 
 function ItemView({ item, streaming, output, conversationId }: { item: Item; streaming?: boolean; output?: Item; conversationId?: string }) {
   if (item.type === 'reasoning') return <Reasoning item={item} streaming={streaming} />

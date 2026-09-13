@@ -6,7 +6,7 @@ import type { User } from './auth.js'
 import { chatSettings, serverTools, userPart, type AssistantBody, type ChatSettings, type DbMessage, type Item, type ResponseEvent, type UserBody, type UserPart } from '../shared/types.js'
 import { listModels, responsesStream } from './openrouter.js'
 import { deepestLeaf, pathToRoot, siblings } from './tree.js'
-import { escapeLike } from '../shared/search.js'
+import { historyTools, searchConversations } from './history.js'
 import { createRun, runs, type Run } from './runs.js'
 import { resolveTools, runTurn, toFunctionTool, toInputItem, type AppTool } from './tools.js'
 
@@ -31,29 +31,9 @@ const conversationsRouter = {
       .where(eq(conversations.userId, context.user.id))
       .orderBy(desc(conversations.updatedAt)),
   ),
-  // タイトル + 本文 (input_text / output_text の text) の部分一致検索。会話単位で返す
-  // ponytail: 全走査。遅くなったら messages に検索用テキストの generated column + pg_trgm GIN を追加する
   search: base.input(z.object({ q: z.string().min(1).max(200) })).handler(({ context, input }) => {
     const q = input.q.trim()
-    if (!q) return []
-    const pat = `%${escapeLike(q)}%`
-    return db
-      .select({ id: conversations.id, title: conversations.title, updatedAt: conversations.updatedAt })
-      .from(conversations)
-      .where(
-        and(
-          eq(conversations.userId, context.user.id),
-          sql`(${conversations.title} ilike ${pat} escape '\\' or exists (
-            select 1 from ${messages}
-            where ${messages.conversationId} = ${conversations.id}
-              and jsonb_path_query_array(
-                    ${messages.body},
-                    'strict $.**.content[*] ? (@.type == "input_text" || @.type == "output_text").text'
-                  )::text ilike ${pat} escape '\\'))`,
-        ),
-      )
-      .orderBy(desc(conversations.updatedAt))
-      .limit(50)
+    return q ? searchConversations(context.user.id, q) : []
   }),
   get: base.input(z.object({ id: z.uuid() })).handler(async ({ context, input }) => {
     const conversation = await ownConversation(context.user.id, input.id)
@@ -169,7 +149,8 @@ const messagesRouter = {
       const inputItems = (await resolveAttachments(context.user.id, history)).map(toInputItem)
 
       const s = input.settings
-      const appTools = await resolveTools(s, context.user.id)
+      const useHistory = !!s.tools?.includes('app:history')
+      const appTools = [...(await resolveTools(s, context.user.id)), ...(useHistory ? historyTools(context.user.id, conv.id) : [])]
       const tools = [
         ...serverTools.filter((t) => s.tools?.includes(t.id)).map((t) => ('parameters' in t ? { type: t.id, parameters: t.parameters } : { type: t.id })),
         ...appTools.map(toFunctionTool),
@@ -178,7 +159,13 @@ const messagesRouter = {
       const today = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' })
       const body: Record<string, unknown> = {
         model: s.model,
-        instructions: `今日の日付は ${today} (JST) です。`,
+        instructions: [
+          `今日の日付は ${today} (JST) です。`,
+          // ツール description だけだと「前に聞いた」と言われたときしか動かないので、自発的に使うよう明示する
+          useHistory && 'ユーザーが明示しなくても、以前の相談の続きやユーザー固有の事情・好みが関係しそうな話題なら、まず search_past_chats で過去のチャットを確認してから答えてください。',
+        ]
+          .filter(Boolean)
+          .join('\n'),
         input: inputItems,
         ...(s.reasoning && { reasoning: s.reasoning }),
         ...(tools.length && { tools }),
