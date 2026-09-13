@@ -1,0 +1,140 @@
+name: preview
+# `preview` ラベルの付いた PR ごとに tailnet 上へ一時環境を立て、閉じたら撤去する。
+# 動くのは self-hosted runner (ラベル: self-hosted, preview) を置いた社内の Docker ホスト。
+on:
+  pull_request: # pull_request_target は使わない (PR のコードを特権付きで走らせないため)
+    types: [labeled, unlabeled, synchronize, reopened, closed]
+  workflow_dispatch: # ai-implement が呼ぶ: GITHUB_TOKEN による push / ラベル付与は pull_request イベントを起こさないため
+    inputs:
+      pr: { description: "PR 番号", required: true }
+permissions:
+  contents: read
+  pull-requests: write
+concurrency:
+  group: preview-${{ inputs.pr || github.event.pull_request.number }}
+  cancel-in-progress: true
+env:
+  PR: ${{ inputs.pr || github.event.pull_request.number }}
+  FILE: deploy/preview/compose.yaml
+jobs:
+  resolve: # 対象 PR の状態を API で見る (dispatch では payload に PR がない)
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event.action != 'closed' && github.event.action != 'unlabeled'
+          && (github.event.action != 'labeled' || github.event.label.name == 'preview'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.pr.outputs.go }}
+      sha: ${{ steps.pr.outputs.sha }}
+      base: ${{ steps.pr.outputs.base }}
+    steps:
+      - id: pr
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json headRefOid,baseRefName,isCrossRepository,state,labels > pr.json
+          jq -r '"sha=\(.headRefOid)", "base=\(.baseRefName)"' pr.json >> "$GITHUB_OUTPUT"
+          if jq -e '.state == "OPEN" and .isCrossRepository == false and any(.labels[]; .name == "preview")' pr.json >/dev/null; then
+            echo go=1 >> "$GITHUB_OUTPUT"
+          else
+            echo "PR $PR is closed, from a fork, or has no 'preview' label: nothing to deploy"
+          fi
+
+  deploy:
+    needs: resolve
+    if: needs.resolve.outputs.go == '1'
+    runs-on: [self-hosted, preview]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "refs/pull/${{ env.PR }}/merge", fetch-depth: 0 } # PR のマージ結果。fetch-depth 0 は base を取り出すため
+      - name: Pin deploy config to the base branch # PR 側が compose を書き換えてホストを触るのを防ぐ
+        run: git checkout "origin/${{ needs.resolve.outputs.base }}" -- deploy/preview
+      - name: Check host prerequisites and secrets
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_PREVIEW_API_KEY }}
+          TAILNET_DOMAIN: ${{ vars.TAILNET_DOMAIN }}
+        run: |
+          for c in docker jq; do command -v $c >/dev/null || { echo "::error::$c is not installed on the preview host"; exit 1; }; done
+          docker compose version >/dev/null || { echo "::error::docker compose v2 plugin is required"; exit 1; }
+          for v in TS_AUTHKEY OPENROUTER_API_KEY TAILNET_DOMAIN; do
+            [ -n "${!v}" ] || { echo "::error::$v is not set (secrets: TS_AUTHKEY / OPENROUTER_PREVIEW_API_KEY, vars: TAILNET_DOMAIN)"; exit 1; }
+          done
+      - name: Bring the stack up
+        id: up
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_PREVIEW_API_KEY }}
+          PREVIEW_USER: ${{ vars.PREVIEW_USER }}
+          TAILNET_DOMAIN: ${{ vars.TAILNET_DOMAIN }}
+          MODELS: ${{ vars.PREVIEW_MODELS }}
+        run: |
+          set -euo pipefail
+          # ts は設定が変わらない限り再作成されない = ノード identity と取得済み証明書を維持する
+          docker compose -f "$FILE" -p "orchat-pr-$PR" up -d --build --remove-orphans
+          ok=
+          for _ in $(seq 1 90); do
+            if docker compose -f "$FILE" -p "orchat-pr-$PR" exec -T app \
+                 node -e "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))" 2>/dev/null; then
+              ok=1; break
+            fi
+            sleep 2
+          done
+          DNS=$(docker compose -f "$FILE" -p "orchat-pr-$PR" exec -T ts tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // empty' || true)
+          URL="https://${DNS:-orchat-pr-$PR.$TAILNET_DOMAIN.}"
+          echo "url=${URL%.}" >> "$GITHUB_OUTPUT"
+          if [ -z "$ok" ]; then
+            echo "::group::app logs"; docker compose -f "$FILE" -p "orchat-pr-$PR" logs --tail 200 app; echo "::endgroup::"
+            echo "::error::app did not become healthy within 180s"; exit 1
+          fi
+      - name: Comment the preview URL
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          URL: ${{ steps.up.outputs.url }}
+          OK: ${{ steps.up.outcome }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+        with:
+          script: |
+            const marker = '<!-- orchat-preview -->'
+            const ok = process.env.OK === 'success'
+            const issue_number = Number(process.env.PR)
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            const body = [marker,
+              ok ? `### プレビュー環境: ${process.env.URL}` : '### プレビュー環境: **起動に失敗**',
+              '',
+              `commit \`${process.env.SHA.slice(0, 7)}\` / ${new Date().toISOString()} / [run](${run})`,
+              '',
+              ok ? 'tailnet 内からのみ到達可能。自動ログイン済み (DEV_USER)、DB は PR ごとの空 Postgres。'
+                 : 'ログは run を参照。`preview` ラベルを外すと撤去します。',
+            ].join('\n')
+            const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number, per_page: 100 })
+            const prev = comments.find((c) => c.body?.startsWith(marker))
+            prev ? await github.rest.issues.updateComment({ ...context.repo, comment_id: prev.id, body })
+                 : await github.rest.issues.createComment({ ...context.repo, issue_number, body })
+
+  down:
+    if: >-
+      github.event.action == 'closed'
+      || (github.event.action == 'unlabeled' && github.event.label.name == 'preview')
+    runs-on: [self-hosted, preview]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ github.event.pull_request.base.ref }}" } # マージ済み PR では merge ref が消えている
+      - name: Tear the stack down
+        run: |
+          docker compose -f "$FILE" -p "orchat-pr-$PR" ps -q | grep -q . || { echo "no stack for PR $PR"; exit 0; }
+          # ephemeral なので logout するとノードは tailnet から即消える
+          docker compose -f "$FILE" -p "orchat-pr-$PR" exec -T ts tailscale logout || true
+          docker compose -f "$FILE" -p "orchat-pr-$PR" down -v --remove-orphans --rmi local
+      - name: Mark the comment as torn down
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- orchat-preview -->'
+            const { data: comments } = await github.rest.issues.listComments({ ...context.repo, issue_number: context.issue.number, per_page: 100 })
+            const prev = comments.find((c) => c.body?.startsWith(marker))
+            if (prev) await github.rest.issues.updateComment({ ...context.repo, comment_id: prev.id,
+              body: `${marker}\n### プレビュー環境: 撤去済み\n\n\`preview\` ラベルを付け直せば再作成します。` })

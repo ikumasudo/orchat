@@ -1,0 +1,33 @@
+name: preview-gc
+# 取りこぼし掃除。webhook が落ちた・ラベルを外さず放置された等で残ったスタックを毎朝撤去する。
+on:
+  schedule: [{ cron: "0 19 * * *" }] # 04:00 JST
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read
+concurrency: { group: preview-gc }
+jobs:
+  gc:
+    runs-on: [self-hosted, preview]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove stacks whose PR is closed or unlabeled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          keep=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" \
+            | jq -r '.[] | select(any(.labels[]; .name == "preview")) | "orchat-pr-\(.number)"')
+          echo "keep: ${keep:-(none)}"
+          for p in $(docker compose ls --all --format json | jq -r '.[].Name' | grep -E '^orchat-pr-[0-9]+$' || true); do
+            if echo "$keep" | grep -qx "$p"; then continue; fi
+            echo "removing $p"
+            docker compose -f deploy/preview/compose.yaml -p "$p" exec -T ts tailscale logout || true
+            docker compose -f deploy/preview/compose.yaml -p "$p" down -v --remove-orphans --rmi local || true
+          done
+          docker image prune -f
+          docker builder prune -f --filter until=168h
+          df -h / | tail -1
