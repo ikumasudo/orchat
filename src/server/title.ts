@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db, schema } from './db/index.js'
 import { responsesText } from './openrouter.js'
 
@@ -25,5 +25,5 @@ export async function generateTitle(conversationId: string, userText: string, as
       max_output_tokens: 1000, // auto が reasoning モデルに振ると推論分も消費する (60 では使い切って message が出なかった)
     }),
   )
-  if (title) await db.update(schema.conversations).set({ title }).where(eq(schema.conversations.id, conversationId))
+  if (title) await db.update(schema.conversations).set({ title }).where(and(eq(schema.conversations.id, conversationId), eq(schema.conversations.titleManual, false)))
 }

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { and, desc, eq, sql, gte, lt } from 'drizzle-orm'
 import { db, schema } from './db/index.js'
 import type { User } from './auth.js'
-import { chatSettings, serverTools, userPart, type AssistantBody, type ChatSettings, type DbMessage, type Item, type ResponseEvent, type UserBody, type UserPart } from '../shared/types.js'
+import { chatSettings, conversationTitle, serverTools, userPart, type AssistantBody, type ChatSettings, type DbMessage, type Item, type ResponseEvent, type UserBody, type UserPart } from '../shared/types.js'
 import { allowedModels, autoRouter, listModels, responsesStream } from './openrouter.js'
 import { generateTitle } from './title.js'
 import { itemText } from '../shared/responses.js'
@@ -55,6 +55,15 @@ const conversationsRouter = {
   updateSettings: base.input(z.object({ id: z.uuid(), settings: chatSettings })).handler(async ({ context, input }) => {
     await ownConversation(context.user.id, input.id)
     await db.update(conversations).set({ settings: input.settings }).where(eq(conversations.id, input.id))
+  }),
+  rename: base.input(z.object({ id: z.uuid(), title: conversationTitle })).handler(async ({ context, input }) => {
+    const [renamed] = await db
+      .update(conversations)
+      .set({ title: input.title, titleManual: true })
+      .where(and(eq(conversations.id, input.id), eq(conversations.userId, context.user.id)))
+      .returning({ id: conversations.id, title: conversations.title })
+    if (!renamed) throw new ORPCError('NOT_FOUND')
+    return renamed
   }),
   // ブランチ切替: 指定ノードの子孫で最新の葉まで降りる
   setLeaf: base.input(z.object({ id: z.uuid(), messageId: z.uuid() })).handler(async ({ context, input }) => {
@@ -142,14 +151,23 @@ const messagesRouter = {
       if (runs.has(conv.id)) throw new ORPCError('CONFLICT', { message: '応答を生成中です' })
       let parentId = input.parentId
       let userMsg: DbMessage | undefined
-      const titleFrom = !conv.title && input.content ? textOf(input.content) : undefined // 初回送信だけ
+      const titleFrom = !conv.title && !conv.titleManual && input.content ? textOf(input.content) : undefined // 初回送信だけ
 
       if (input.content) {
         const body: UserBody = { type: 'message', role: 'user', content: input.content }
         ;[userMsg] = (await db.insert(messages).values({ conversationId: conv.id, parentId, role: 'user', body }).returning()) as DbMessage[]
         parentId = userMsg.id
-        const title = conv.title || textOf(input.content).slice(0, 50)
-        await db.update(conversations).set({ leafId: userMsg.id, title, settings: input.settings, updatedAt: new Date() }).where(eq(conversations.id, conv.id))
+        // タイトルはDB行の最新値で判定し、空の自動タイトルだけ初回フォールバックで埋める。手動設定はCASEで保持する
+        const fallbackTitle = textOf(input.content).slice(0, 50)
+        await db
+          .update(conversations)
+          .set({
+            leafId: userMsg.id,
+            title: sql`case when ${conversations.title} = '' and ${conversations.titleManual} = false then ${fallbackTitle} else ${conversations.title} end`,
+            settings: input.settings,
+            updatedAt: new Date(),
+          })
+          .where(eq(conversations.id, conv.id))
       }
 
       // 履歴 = user message item + assistant の output items をそのまま並べる (reasoning / server tool の item も含めて返送する)
