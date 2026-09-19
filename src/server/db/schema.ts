@@ -1,5 +1,5 @@
 import type { ChatSettings } from '../../shared/types.js'
-import { pgTable, uuid, text, timestamp, jsonb, numeric, integer, customType, index } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, timestamp, jsonb, numeric, integer, boolean, customType, index } from 'drizzle-orm/pg-core'
 
 const bytea = customType<{ data: Buffer }>({ dataType: () => 'bytea' })
 
@@ -17,6 +17,7 @@ export const conversations = pgTable(
     id: uuid().primaryKey().defaultRandom(),
     userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     title: text().notNull().default(''),
+    titleManual: boolean('title_manual').notNull().default(false),
     leafId: uuid('leaf_id'),
     settings: jsonb().$type<ChatSettings>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

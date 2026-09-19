@@ -24,6 +24,9 @@ export const chatSettings = z.object({
 })
 export type ChatSettings = z.infer<typeof chatSettings>
 
+// 手動改名の入力契約。サーバー・クライアントで共有する
+export const conversationTitle = z.string().trim().min(1, '名前を入力してください').max(100, '名前は100文字以内で入力してください').regex(/^[^\r\n]*$/, '名前は1行で入力してください')
+
 // ユーザー入力の content parts (Responses API の input_*)。添付は attachment:<uuid> 参照で保存し送信時に data URL へ解決する
 export const userPart = z.union([
   z.object({ type: z.literal('input_text'), text: z.string() }),
