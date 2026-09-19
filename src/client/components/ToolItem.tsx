@@ -86,13 +86,15 @@ function FunctionCallItem({ item, output, conversationId }: { item: Item; output
   const result = typeof output?.output === 'string' ? output.output : undefined
   const failed = result?.startsWith('エラー:')
   const state = pending ? 'approval-requested' : item.approval === 'denied' ? 'output-denied' : result == null ? 'input-available' : failed ? 'output-error' : 'output-available'
+  const label = functionLabels[item.name ?? ''] ?? item.name ?? 'ツール'
+  const detail = functionDetail(item)
   const decide = (approved: boolean) => {
     setDecided(true)
     if (conversationId && item.call_id) client.messages.decide({ conversationId, callId: item.call_id, approved }).catch(() => setDecided(false))
   }
   return (
     <Tool className="mb-2 bg-card/60" defaultOpen={pending}>
-      <ToolHeader type={`tool-${item.name ?? 'function'}`} state={state} title={functionLabels[item.name ?? ''] ?? item.name ?? 'ツール'} />
+      <ToolHeader type={`tool-${item.name ?? 'function'}`} state={state} title={detail ? `${label} — ${detail}` : label} />
       <ToolContent>
         <ToolInput input={parseArgs(item.arguments)} />
         {pending && conversationId && (
@@ -123,4 +125,13 @@ const parseArgs = (args: unknown): unknown => {
   } catch {
     return args
   }
+}
+
+// read_skill_file の「どのスキルのどのファイルか」を 1 行で表す。ストリーミング中は arguments が未完成なので空文字
+export function functionDetail(item: Item): string {
+  if (item.name !== 'read_skill_file') return ''
+  const args = parseArgs(item.arguments)
+  if (!args || typeof args !== 'object') return ''
+  const { name, path } = args as { name?: unknown; path?: unknown }
+  return [name, path].filter((v): v is string => typeof v === 'string' && !!v).join(' / ')
 }

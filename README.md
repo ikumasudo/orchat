@@ -20,6 +20,7 @@ Self-hosted, OpenRouter-only team chat for small companies. SSO (OIDC), per-user
 - OpenRouter **Responses API** (`/api/v1/responses`) をそのまま通す設計。input/output items を抽象化せず保存・返送する
 - reasoning (thinking) のストリーム表示と、会話往復での保持 (署名/暗号化ごと保存して返送)
 - OpenRouter server tools: Web検索 / Web取得 / シェル (サンドボックス実行、コマンドと stdout を表示) / 日時。一覧は `src/shared/types.ts` の `serverTools`
+- **Agent Skills**: `SKILLS_DIR` (既定 `./skills`) の `<name>/SKILL.md` を読み、一覧だけをモデルに渡す。モデルは必要になったときだけ `read_skill_file` で本文と同梱ファイルを読む (追加・変更は次回の送信から反映)
 - ブランチ (編集・再生成)、画像/PDF 添付、Markdown/数式/シンタックスハイライト
 
 ## 構成
@@ -34,6 +35,7 @@ Self-hosted, OpenRouter-only team chat for small companies. SSO (OIDC), per-user
 src/server/  index.ts (Hono) / router.ts (oRPC) / runs.ts (ストリーム) / openrouter.ts / auth.ts / tools.ts / tree.ts / db/
 src/client/  routes/{chat,usage}.tsx / components/{ui,ai-elements} (shadcn・AI Elements の取り込みコピー)
 drizzle/     migration (サーバー起動時に自動適用)
+skills/      Agent Skills のサンプル (`<name>/SKILL.md`)
 test/        node:test の純粋なユニットテスト
 ```
 
@@ -71,7 +73,24 @@ docker compose up -d      # 公開イメージ ghcr.io/ikumasudo/orchat:latest �
 | `MODELS` | 表示するモデル id のカンマ区切り。空なら全モデル。`openrouter/auto` を選んだときの行き先もこの一覧 (auto 自身を除く) に絞られる。設定するなら `openrouter/auto` 自身も入れること |
 | `TITLE_MODEL` | チャットタイトルの生成に使うモデル。空なら `openrouter/auto` (安価な帯に自動ルーティング、`MODELS` とは独立) |
 | `ADMIN_EMAILS` | `/usage` で全員分を見られるユーザー (カンマ区切り) |
+| `SKILLS_DIR` | Agent Skills (`<name>/SKILL.md`) を置くディレクトリ。既定 `./skills`。compose では `/app/skills` にマウント済み |
 | `DEV_USER` | 開発時のみ。OIDC をスキップしてこのメールでログイン (production では無効) |
+
+### Agent Skills (手順書)
+
+`SKILLS_DIR` (既定 `./skills`) の下に `<name>/SKILL.md` を置くと、モデルは一覧 (name / description) だけを見て、必要になったときだけ `read_skill_file` で本文と同梱ファイルを読みます。[Agent Skills の仕様](https://agentskills.io/specification) の段階的読み込みを OpenRouter 経由で再現したものです。
+
+```
+skills/
+  meeting-summary/          # サンプル
+    SKILL.md                # name / description を frontmatter に書く (一覧に使う。本文は読ませない)
+    references/template.md  # 同梱ファイル (必要なときだけ読まれる)
+```
+
+- `name` はディレクトリ名と同じにする (英小文字・数字・ハイフン、1-64 文字、ハイフン連続不可)。`description` は 1-1024 文字
+- 規約に合わない SKILL.md は送信時に `skills: skill "..." を除外しました: ...` とサーバーログに警告して無視します
+- 読み込みは送信のたびなので、追加・変更は次の送信から反映されます (再起動不要)。読み取り専用で、スキルのディレクトリの外は読めません
+- 別の場所を使うときは `SKILLS_DIR` をコンテナ内パスに設定し、compose のマウント先を合わせてください (`volumes: [./my-skills:/app/my-skills:ro]`)
 
 ### アップグレード
 

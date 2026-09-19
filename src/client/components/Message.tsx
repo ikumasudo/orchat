@@ -22,7 +22,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { cn } from '@/lib/utils'
 import type { Components, ExtraProps } from 'streamdown'
 import { Reasoning } from './Reasoning.js'
-import { ToolItem } from './ToolItem.js'
+import { ToolItem, functionDetail } from './ToolItem.js'
 
 type Props = {
   message: Pick<DbMessage, 'id' | 'role' | 'body'> & Partial<DbMessage>
@@ -189,7 +189,7 @@ function ActivityBlock({ steps, streaming, conversationId }: { steps: Item[]; st
 function ActiveStep({ item }: { item: Item }) {
   if (item.type === 'reasoning') return <Shimmer duration={1}>思考中…</Shimmer>
   if (item.type === 'function_call' && item.approval === 'pending') return <>承認待ち: {toolLabel(item)}</>
-  const detail = item.action?.query ?? item.url ?? ''
+  const detail = item.action?.query ?? item.url ?? functionDetail(item)
   return <>{detail ? `${toolLabel(item)}: ${detail}` : `${toolLabel(item)}: 実行中`}</>
 }
 

@@ -12,6 +12,7 @@ import { historyTools, recentConversations, searchConversations } from './histor
 import { recentChatsPrompt } from '../shared/search.js'
 import { createRun, runs, type Run } from './runs.js'
 import { resolveTools, runTurn, toFunctionTool, toInputItem, type AppTool } from './tools.js'
+import { loadSkills, skillsPrompt, skillTools } from './skills.js'
 
 const base = os.$context<{ user: User }>()
 const { conversations, messages, attachments, users } = schema
@@ -177,7 +178,10 @@ const messagesRouter = {
 
       const s = input.settings
       const useHistory = !!s.tools?.includes('app:history')
-      const appTools = [...(await resolveTools(s, context.user.id)), ...(useHistory ? historyTools(context.user.id, conv.id) : [])]
+      // Skill は送信のたびに読み直す (追加・変更が再起動なしで反映される)。一覧は 1 つ以上あるときだけ提示する
+      const { skills, warnings } = await loadSkills()
+      for (const w of warnings) console.warn(`skills: ${w}`)
+      const appTools = [...(await resolveTools(s, context.user.id)), ...(useHistory ? historyTools(context.user.id, conv.id) : []), ...skillTools(skills)]
       // 直近の会話をモデルに見せる。検索は自発的に起きにくいので、まず一覧で「最近の関心」を渡す
       // ponytail: 10 件固定。トークンが気になれば件数を減らす
       const recent = useHistory ? await recentConversations(context.user.id, conv.id) : []
@@ -194,6 +198,7 @@ const messagesRouter = {
             `今日の日付は ${today} (JST) です。`,
             // ツール description だけだと「前に聞いた」と言われたときしか動かないので、一覧と共に自発的に使うよう明示する
             useHistory && (recentChatsPrompt(recent) || 'ユーザーが明示しなくても、以前の相談の続きやユーザー固有の事情・好みが関係しそうな話題なら、まず search_past_chats で過去のチャットを確認してから答えてください。'),
+            skills.length > 0 && skillsPrompt(skills),
           ]
             .filter(Boolean)
             .join('\n'),
