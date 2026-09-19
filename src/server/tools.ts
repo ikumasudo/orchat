@@ -11,7 +11,7 @@ export type AppTool = {
   execute(args: unknown, ctx: { userId: string; signal: AbortSignal }): Promise<string> // モデルに返す文字列
 }
 
-// 設定から使えるツールを解決する。MCP / Skill (後続 Issue) がここに足す
+// 設定から使えるツールを解決する。MCP (後続 Issue) がここに足す。Skill は skills.ts 側
 export async function resolveTools(_settings: ChatSettings, _userId: string): Promise<AppTool[]> {
   return []
 }
