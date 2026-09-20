@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import { sseData } from '../src/server/openrouter.ts'
-import { addUsage, applyEvent, initialState, itemDone, itemText, offsetEvent, splitStepsAnswer } from '../src/shared/responses.ts'
+import { addUsage, applyEvent, initialState, itemDone, itemText, offsetEvent, shellFiles, splitStepsAnswer } from '../src/shared/responses.ts'
 import type { Item, ResponseEvent } from '../src/shared/types.ts'
 
 test('applyEvent builds items from added/delta/annotation events', () => {
@@ -54,6 +54,21 @@ test('splitStepsAnswer: ストリーミング中の境界移動', () => {
   // 最終回答が来たら末尾だけ回答に戻る
   out = [...out, msg('答え')]
   assert.deepEqual(splitStepsAnswer(out), { steps: [msg('Hello'), tool], answer: [msg('答え')] })
+})
+
+test('shellFiles: shell item の files を file_id で重複排除し、表示名は basename', () => {
+  const shell = (files?: Item['files']): Item => ({ type: 'openrouter:shell', files })
+  const items: Item[] = [
+    { type: 'message' },
+    shell([{ file_id: 'cfile_a', filename: 'out/a.csv' }, { file_id: 'cfile_b', filename: 'b.csv' }]),
+    shell([{ file_id: 'cfile_a', filename: 'out/a.csv' }, { file_id: 'cfile_c' }]),
+  ]
+  assert.deepEqual(shellFiles(items), [
+    { file_id: 'cfile_a', filename: 'a.csv' },
+    { file_id: 'cfile_b', filename: 'b.csv' },
+    { file_id: 'cfile_c', filename: 'cfile_c' },
+  ])
+  assert.deepEqual(shellFiles([{ type: 'openrouter:web_search' }]), [])
 })
 
 test('function_call_arguments.delta は output_item.done / response.completed で上書きされる (applyEvent 無変更で足りる)', () => {

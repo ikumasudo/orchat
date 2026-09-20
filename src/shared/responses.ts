@@ -70,6 +70,16 @@ export function splitStepsAnswer(output: Item[]): { steps: Item[]; answer: Item[
   return { steps: output.slice(0, i), answer: output.slice(i) }
 }
 
+// shell が作成/変更したファイル (file_id で重複排除、output 順)
+export function shellFiles(items: Item[]): Array<{ file_id: string; filename: string }> {
+  const out = new Map<string, { file_id: string; filename: string }>()
+  for (const it of items) {
+    if (it.type !== 'openrouter:shell') continue
+    for (const f of it.files ?? []) if (f.file_id) out.set(f.file_id, { file_id: f.file_id, filename: f.filename?.split('/').pop() || f.file_id })
+  }
+  return [...out.values()]
+}
+
 // ---- ツールループ用 (1 ターンに複数リクエストを流して 1 つの output に連結する) ----
 
 // usage の数値フィールドを合算する (両方数値なら足す、片方だけなら残す、object は再帰)

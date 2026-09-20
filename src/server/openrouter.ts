@@ -40,6 +40,20 @@ export async function responsesText(body: Record<string, unknown>): Promise<stri
   return text
 }
 
+// shell item が引用した file_id から、ダウンロードに使う container_id と表示名を引く。
+// 引用に無い file_id は undefined (クライアント指定の container_id は使わない)
+export function findShellFile(item: Item, fileId: string): { container_id: string; filename: string } | undefined {
+  const f = item.files?.find((x) => x.file_id === fileId)
+  const container_id = f?.container_id ?? item.container_id
+  if (!f || !container_id) return undefined
+  return { container_id, filename: f.filename ?? fileId }
+}
+
+// container ファイルの生バイト。所有確認は呼び出し側で済ませてから使う
+export function containerFileContent(containerId: string, fileId: string): Promise<Response> {
+  return fetch(`${BASE}/containers/${encodeURIComponent(containerId)}/files/${encodeURIComponent(fileId)}/content`, { headers: headers() })
+}
+
 // `data: ...` 行だけを取り出す最小 SSE パーサ (コメント行 `: OPENROUTER PROCESSING` は捨てる)
 export async function* sseData(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const decoder = new TextDecoder()

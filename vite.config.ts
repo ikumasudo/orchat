@@ -16,7 +16,7 @@ export default defineConfig({
     port: 5174,
     strictPort: true,
     proxy: Object.fromEntries(
-      ['/rpc', '/login', '/logout', '/callback', '/attachments'].map((p) => [p, api]),
+      ['/rpc', '/login', '/logout', '/callback', '/attachments', '/messages'].map((p) => [p, api]),
     ),
   },
 })
