@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { autoRouter } from '../src/server/openrouter.ts'
+import { autoRouter, isModelAllowed } from '../src/server/openrouter.ts'
 
 const allow = ['openrouter/auto', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-luna']
 
@@ -22,4 +22,19 @@ test('autoRouter: auto 以外は素通し', () => {
   const body = autoRouter(src, allow)
   assert.equal(body, src)
   assert.equal(body.reasoning, undefined)
+})
+
+test('isModelAllowed: MODELS 空なら任意のモデルを許可する', () => {
+  assert.equal(isModelAllowed('openai/gpt-5.6-sol', []), true)
+  assert.equal(isModelAllowed('anthropic/claude-sonnet-4.5', []), true)
+})
+
+test('isModelAllowed: MODELS 設定時は一覧にあるモデルだけ許可する', () => {
+  assert.equal(isModelAllowed('openai/gpt-5.6-luna', allow), true)
+  assert.equal(isModelAllowed('openrouter/auto', allow), true)
+  assert.equal(isModelAllowed('anthropic/claude-sonnet-4.5', allow), false)
+})
+
+test('isModelAllowed: auto を使うには一覧に auto 自身が必要', () => {
+  assert.equal(isModelAllowed('openrouter/auto', ['openai/gpt-5.6-luna']), false)
 })
