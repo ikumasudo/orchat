@@ -1,8 +1,8 @@
 import { cloneElement, createContext, isValidElement, useContext, useEffect, useRef, useState, type JSX, type ReactElement, type ReactNode } from 'react'
-import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, FileTextIcon, PencilIcon, RefreshCwIcon } from 'lucide-react'
+import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, DownloadIcon, FileTextIcon, PencilIcon, RefreshCwIcon } from 'lucide-react'
 import type { Annotation, AssistantBody, DbMessage, Item, UserBody, UserPart } from '../../shared/types.js'
 import { functionLabels, serverTools } from '../../shared/types.js'
-import { isToolItem, itemText, splitStepsAnswer } from '../../shared/responses.js'
+import { isToolItem, itemText, shellFiles, splitStepsAnswer } from '../../shared/responses.js'
 import {
   Message as AiMessage,
   MessageAction,
@@ -18,6 +18,7 @@ import { JSXPreview, JSXPreviewContent, JSXPreviewError } from '@/components/ai-
 import { Shimmer } from '@/components/ai-elements/shimmer'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
 import type { Components, ExtraProps } from 'streamdown'
@@ -40,7 +41,7 @@ export function Message({ message: m, siblings = [], streaming, last, onRegenera
   const text = isUser ? '' : assistantText(m.body as AssistantBody)
   return (
     <AiMessage from={isUser ? 'user' : 'assistant'} className={isUser ? 'max-w-[85%]' : 'max-w-full'}>
-      {isUser ? <UserContent content={(m.body as UserBody).content} /> : <AssistantContent body={m.body as AssistantBody} streaming={streaming} conversationId={m.conversationId} />}
+      {isUser ? <UserContent content={(m.body as UserBody).content} /> : <AssistantContent body={m.body as AssistantBody} streaming={streaming} conversationId={m.conversationId} messageId={streaming ? undefined : m.id} />}
       {!streaming && (
         <footer className={`flex min-h-7 items-center gap-1 text-muted-foreground ${isUser ? 'justify-end' : ''}`}>
           {siblings.length > 1 && onSwitch && (
@@ -128,9 +129,10 @@ const attachmentUrl = (ref: string) => (ref.startsWith('attachment:') ? `/attach
 
 // output を「活動ブロック (ステップ)」と「回答」に分けて描く。
 // 末尾に連続する message が回答、それより前 (reasoning・ツール・途中 message) は折りたたみ 1 つに集約する
-function AssistantContent({ body, streaming, conversationId }: { body: AssistantBody; streaming?: boolean; conversationId?: string }) {
+function AssistantContent({ body, streaming, conversationId, messageId }: { body: AssistantBody; streaming?: boolean; conversationId?: string; messageId?: string }) {
   const items = body.output.filter(Boolean)
   const { steps, answer } = splitStepsAnswer(items)
+  const files = shellFiles(items)
   const citations = new Map<string, Annotation>()
   for (const it of items) for (const p of it.content ?? []) for (const a of p.annotations ?? []) if (a.type === 'url_citation' && a.url) citations.set(a.url, a)
   return (
@@ -139,6 +141,25 @@ function AssistantContent({ body, streaming, conversationId }: { body: Assistant
       {answer.map((item, i) => (
         <ItemView key={item.id ?? `a${i}`} item={item} streaming={streaming} />
       ))}
+      {files.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {files.map((f) =>
+            messageId ? (
+              <Button key={f.file_id} asChild variant="outline" size="sm">
+                <a href={`/messages/${messageId}/files/${f.file_id}`} download>
+                  <DownloadIcon />
+                  {f.filename}
+                </a>
+              </Button>
+            ) : (
+              <Button key={f.file_id} variant="outline" size="sm" disabled>
+                <DownloadIcon />
+                {f.filename}
+              </Button>
+            ),
+          )}
+        </div>
+      )}
       {streaming && !items.length && <span aria-label="生成中" className="my-1.5 block size-3 animate-pulse rounded-full bg-foreground/50" />}
       {body.error && <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{body.error}</p>}
       {citations.size > 0 && (

@@ -37,6 +37,9 @@ export type UserPart = z.infer<typeof userPart>
 
 // Responses API の item / part。既知のキーだけ型付けし、残りは透過
 export type Annotation = { type: string; url?: string; title?: string; start_index?: number; end_index?: number; [k: string]: unknown }
+// shell の実行結果に付く、コンテナ内で作成/変更されたファイルの引用 (file_id は cfile_...)。
+// ダウンロードには container_id と file_id の両方が要る
+export type ContainerFileCitation = { type?: string; file_id?: string; filename?: string; container_id?: string; [k: string]: unknown }
 export type Part = { type: string; text?: string; annotations?: Annotation[]; [k: string]: unknown }
 export type Item = {
   type: string // message | reasoning | openrouter:web_search | openrouter:web_fetch | web_search_call | function_call …
@@ -51,6 +54,9 @@ export type Item = {
   url?: string
   // openrouter:shell の実行結果 (配列) / function_call_output の結果 (文字列)
   output?: Array<{ stdout?: string; stderr?: string; outcome?: { type?: string; exit_code?: number } }> | string
+  // openrouter:shell が作成/変更したファイルと、その実行コンテナ
+  files?: ContainerFileCitation[]
+  container_id?: string
   // function_call / function_call_output
   call_id?: string
   name?: string

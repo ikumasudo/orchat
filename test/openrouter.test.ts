@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { autoRouter, isModelAllowed } from '../src/server/openrouter.ts'
+import { autoRouter, findShellFile, isModelAllowed } from '../src/server/openrouter.ts'
+import type { Item } from '../src/shared/types.ts'
 
 const allow = ['openrouter/auto', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-luna']
 
@@ -37,4 +38,23 @@ test('isModelAllowed: MODELS 設定時は一覧にあるモデルだけ許可す
 
 test('isModelAllowed: auto を使うには一覧に auto 自身が必要', () => {
   assert.equal(isModelAllowed('openrouter/auto', ['openai/gpt-5.6-luna']), false)
+})
+
+const shell = (extra: Partial<Item>): Item => ({ type: 'openrouter:shell', ...extra })
+
+test('findShellFile: files の file_id から container_id と表示名を引く', () => {
+  const item = shell({ container_id: 'gen_1', files: [{ type: 'container_file_citation', file_id: 'cfile_a', filename: 'out/a.png', container_id: 'gen_1' }] })
+  assert.deepEqual(findShellFile(item, 'cfile_a'), { container_id: 'gen_1', filename: 'out/a.png' })
+})
+
+test('findShellFile: container_id は引用 → item の順でフォールバックする', () => {
+  const item = shell({ container_id: 'gen_1', files: [{ file_id: 'cfile_a', filename: 'a.png' }] })
+  assert.deepEqual(findShellFile(item, 'cfile_a'), { container_id: 'gen_1', filename: 'a.png' })
+})
+
+test('findShellFile: 引用に無い file_id や container_id 欠落は拒否', () => {
+  const item = shell({ container_id: 'gen_1', files: [{ file_id: 'cfile_a', filename: 'a.png', container_id: 'gen_1' }] })
+  assert.equal(findShellFile(item, 'cfile_b'), undefined)
+  assert.equal(findShellFile(shell({ files: [{ file_id: 'cfile_a' }] }), 'cfile_a'), undefined)
+  assert.equal(findShellFile(shell({}), 'cfile_a'), undefined)
 })
