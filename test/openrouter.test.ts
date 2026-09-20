@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { autoRouter, findShellFile, isModelAllowed } from '../src/server/openrouter.ts'
+import { autoRouter, findShellFile, isModelAllowed, truncateStream } from '../src/server/openrouter.ts'
 import type { Item } from '../src/shared/types.ts'
 
 const allow = ['openrouter/auto', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-luna']
@@ -67,4 +67,25 @@ test('findShellFile: outputs/ 外や紛らわしいパス、shell 以外の item
   assert.equal(findShellFile(withFile(undefined), 'cfile_a'), undefined)
   const other: Item = { type: 'openrouter:web_search', container_id: 'gen_1', files: [{ file_id: 'cfile_a', filename: 'outputs/a.png', container_id: 'gen_1' }] }
   assert.equal(findShellFile(other, 'cfile_a'), undefined)
+})
+
+const stream = (...chunks: number[][]) => new ReadableStream<Uint8Array>({ start(c) { for (const ch of chunks) c.enqueue(new Uint8Array(ch)); c.close() } })
+const collect = async (s: ReadableStream<Uint8Array>) => { const out: number[] = []; for await (const c of s) out.push(...c); return out }
+
+test('truncateStream: 上限以下はそのまま流す', async () => {
+  assert.deepEqual(await collect(truncateStream(stream([1, 2], [3, 4, 5]), 5)), [1, 2, 3, 4, 5])
+})
+
+test('truncateStream: 上限でチャンク途中に切って終了する', async () => {
+  assert.deepEqual(await collect(truncateStream(stream([1, 2, 3], [4, 5, 6]), 4)), [1, 2, 3, 4])
+})
+
+test('truncateStream: 上限到達で上流を cancel する', async () => {
+  let cancelled = false
+  const upstream = new ReadableStream<Uint8Array>({
+    start(c) { c.enqueue(new Uint8Array([1, 2, 3, 4])) },
+    cancel() { cancelled = true },
+  })
+  assert.deepEqual(await collect(truncateStream(upstream, 2)), [1, 2])
+  assert.equal(cancelled, true)
 })

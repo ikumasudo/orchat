@@ -8,7 +8,8 @@ import { onError } from '@orpc/server'
 import { and, eq } from 'drizzle-orm'
 import { db, schema, migrateDb } from './db/index.js'
 import { claimsHook, oidcServer, requireUser } from './auth.js'
-import { containerFileContent, findShellFile } from './openrouter.js'
+import { containerFileBytes, containerFileContent, findShellFile, truncateStream } from './openrouter.js'
+import { previewType } from '../shared/responses.js'
 import { router } from './router.js'
 import type { AssistantBody } from '../shared/types.js'
 
@@ -47,8 +48,10 @@ app.get('/attachments/:id', requireUser, async (c) => {
   return c.body(new Uint8Array(att.data), 200, { 'Content-Type': att.mime, 'Cache-Control': 'private, max-age=86400' })
 })
 
-// shell ツールがコンテナに作ったファイルのダウンロード。本人の会話の shell item が引用した file_id だけを OpenRouter へ中継する
+// shell ツールがコンテナに作ったファイルのダウンロード (?preview=1 ならプレビュー)。本人の会話の shell item が引用した file_id だけを OpenRouter へ中継する
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const MAX_TEXT_BYTES = 256 * 1024
 app.get('/messages/:messageId/files/:fileId', requireUser, async (c) => {
   const messageId = c.req.param('messageId')
   const fileId = c.req.param('fileId')
@@ -60,8 +63,17 @@ app.get('/messages/:messageId/files/:fileId', requireUser, async (c) => {
     .where(and(eq(schema.messages.id, messageId), eq(schema.conversations.userId, c.get('user').id)))
   const found = (row?.body as AssistantBody | undefined)?.output?.map((it) => findShellFile(it, fileId)).find(Boolean)
   if (!found) return c.notFound()
+  const preview = c.req.query('preview') != null ? previewType(found.filename) : undefined
+  if (preview?.kind === 'image') {
+    const bytes = await containerFileBytes(found.container_id, fileId)
+    if (bytes == null || bytes > MAX_IMAGE_BYTES) return c.notFound() // 上限超過・メタデータ取得失敗はプレビューしない
+  }
   const res = await containerFileContent(found.container_id, fileId)
   if (!res.ok || !res.body) return c.newResponse(null, res.status === 404 ? 404 : 502)
+  if (preview) {
+    const headers = { 'Content-Type': preview.mime, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=86400' }
+    return c.body(preview.kind === 'text' ? truncateStream(res.body, MAX_TEXT_BYTES) : res.body, 200, headers)
+  }
   const name = found.filename.split('/').pop() || fileId
   const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_')
   return c.body(res.body, 200, {

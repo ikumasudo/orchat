@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import { sseData } from '../src/server/openrouter.ts'
-import { addUsage, applyEvent, initialState, itemDone, itemText, offsetEvent, shellFiles, splitStepsAnswer } from '../src/shared/responses.ts'
+import { addUsage, applyEvent, initialState, itemDone, itemText, offsetEvent, previewType, shellFiles, splitStepsAnswer } from '../src/shared/responses.ts'
 import type { Item, ResponseEvent } from '../src/shared/types.ts'
 
 test('applyEvent builds items from added/delta/annotation events', () => {
@@ -82,6 +82,22 @@ test('shellFiles: outputs/ 外や紛らわしいパスは公開しない', () =>
     { file_id: 'cfile_none' },
   ]
   assert.deepEqual(shellFiles([{ type: 'openrouter:shell', files }]), [{ file_id: 'cfile_ok', filename: 'ok.txt' }])
+})
+
+test('previewType: 画像は安全な MIME を返し、大文字拡張子も許可する', () => {
+  assert.deepEqual(previewType('outputs/a.PNG'), { kind: 'image', mime: 'image/png' })
+  assert.deepEqual(previewType('a.jpeg'), { kind: 'image', mime: 'image/jpeg' })
+  for (const f of ['a.jpg', 'a.gif', 'a.webp', 'a.avif']) assert.equal(previewType(f)?.kind, 'image')
+})
+
+test('previewType: テキストは許可拡張子だけ text/plain として扱う', () => {
+  for (const f of ['a.txt', 'a.csv', 'a.tsv', 'a.json', 'a.md', 'a.markdown', 'a.log', 'a.yaml', 'a.yml', 'a.xml']) {
+    assert.deepEqual(previewType(f), { kind: 'text', mime: 'text/plain; charset=utf-8' })
+  }
+})
+
+test('previewType: 能動コンテンツ・不明形式・拡張子なしは拒否', () => {
+  for (const f of ['a.svg', 'a.pdf', 'a.html', 'a.htm', 'a.exe', 'a.png.zip', 'a', 'a.']) assert.equal(previewType(f), undefined)
 })
 
 test('function_call_arguments.delta は output_item.done / response.completed で上書きされる (applyEvent 無変更で足りる)', () => {
