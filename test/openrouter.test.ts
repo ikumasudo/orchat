@@ -42,19 +42,29 @@ test('isModelAllowed: auto を使うには一覧に auto 自身が必要', () =>
 
 const shell = (extra: Partial<Item>): Item => ({ type: 'openrouter:shell', ...extra })
 
-test('findShellFile: files の file_id から container_id と表示名を引く', () => {
-  const item = shell({ container_id: 'gen_1', files: [{ type: 'container_file_citation', file_id: 'cfile_a', filename: 'out/a.png', container_id: 'gen_1' }] })
-  assert.deepEqual(findShellFile(item, 'cfile_a'), { container_id: 'gen_1', filename: 'out/a.png' })
+test('findShellFile: outputs/ 配下の file_id から container_id と表示名を引く', () => {
+  const item = shell({ container_id: 'gen_1', files: [{ type: 'container_file_citation', file_id: 'cfile_a', filename: 'outputs/a.png', container_id: 'gen_1' }] })
+  assert.deepEqual(findShellFile(item, 'cfile_a'), { container_id: 'gen_1', filename: 'outputs/a.png' })
 })
 
 test('findShellFile: container_id は引用 → item の順でフォールバックする', () => {
-  const item = shell({ container_id: 'gen_1', files: [{ file_id: 'cfile_a', filename: 'a.png' }] })
-  assert.deepEqual(findShellFile(item, 'cfile_a'), { container_id: 'gen_1', filename: 'a.png' })
+  const item = shell({ container_id: 'gen_1', files: [{ file_id: 'cfile_a', filename: 'outputs/a.png' }] })
+  assert.deepEqual(findShellFile(item, 'cfile_a'), { container_id: 'gen_1', filename: 'outputs/a.png' })
 })
 
 test('findShellFile: 引用に無い file_id や container_id 欠落は拒否', () => {
-  const item = shell({ container_id: 'gen_1', files: [{ file_id: 'cfile_a', filename: 'a.png', container_id: 'gen_1' }] })
+  const item = shell({ container_id: 'gen_1', files: [{ file_id: 'cfile_a', filename: 'outputs/a.png', container_id: 'gen_1' }] })
   assert.equal(findShellFile(item, 'cfile_b'), undefined)
-  assert.equal(findShellFile(shell({ files: [{ file_id: 'cfile_a' }] }), 'cfile_a'), undefined)
+  assert.equal(findShellFile(shell({ files: [{ file_id: 'cfile_a', filename: 'outputs/a.png' }] }), 'cfile_a'), undefined)
   assert.equal(findShellFile(shell({}), 'cfile_a'), undefined)
+})
+
+test('findShellFile: outputs/ 外や紛らわしいパス、shell 以外の item は拒否', () => {
+  const withFile = (filename?: string): Item => shell({ container_id: 'gen_1', files: [{ file_id: 'cfile_a', filename, container_id: 'gen_1' }] })
+  assert.equal(findShellFile(withFile('tmp/a.png'), 'cfile_a'), undefined)
+  assert.equal(findShellFile(withFile('outputs-old/a.png'), 'cfile_a'), undefined)
+  assert.equal(findShellFile(withFile('outputs/../a.png'), 'cfile_a'), undefined)
+  assert.equal(findShellFile(withFile(undefined), 'cfile_a'), undefined)
+  const other: Item = { type: 'openrouter:web_search', container_id: 'gen_1', files: [{ file_id: 'cfile_a', filename: 'outputs/a.png', container_id: 'gen_1' }] }
+  assert.equal(findShellFile(other, 'cfile_a'), undefined)
 })

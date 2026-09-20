@@ -56,19 +56,32 @@ test('splitStepsAnswer: ストリーミング中の境界移動', () => {
   assert.deepEqual(splitStepsAnswer(out), { steps: [msg('Hello'), tool], answer: [msg('答え')] })
 })
 
-test('shellFiles: shell item の files を file_id で重複排除し、表示名は basename', () => {
+test('shellFiles: outputs/ 配下だけを file_id で重複排除し、表示名は basename', () => {
   const shell = (files?: Item['files']): Item => ({ type: 'openrouter:shell', files })
   const items: Item[] = [
     { type: 'message' },
-    shell([{ file_id: 'cfile_a', filename: 'out/a.csv' }, { file_id: 'cfile_b', filename: 'b.csv' }]),
-    shell([{ file_id: 'cfile_a', filename: 'out/a.csv' }, { file_id: 'cfile_c' }]),
+    shell([{ file_id: 'cfile_a', filename: 'outputs/a.csv' }, { file_id: 'cfile_b', filename: 'outputs/sub/b.csv' }]),
+    shell([{ file_id: 'cfile_a', filename: 'outputs/a.csv' }, { file_id: 'cfile_c' }]),
   ]
   assert.deepEqual(shellFiles(items), [
     { file_id: 'cfile_a', filename: 'a.csv' },
     { file_id: 'cfile_b', filename: 'b.csv' },
-    { file_id: 'cfile_c', filename: 'cfile_c' },
   ])
   assert.deepEqual(shellFiles([{ type: 'openrouter:web_search' }]), [])
+})
+
+test('shellFiles: outputs/ 外や紛らわしいパスは公開しない', () => {
+  const files = [
+    { file_id: 'cfile_ok', filename: 'outputs/ok.txt' },
+    { file_id: 'cfile_tmp', filename: 'tmp/x.txt' },
+    { file_id: 'cfile_root', filename: 'x.txt' },
+    { file_id: 'cfile_old', filename: 'outputs-old/x.txt' },
+    { file_id: 'cfile_up', filename: 'outputs/../secret.txt' },
+    { file_id: 'cfile_abs', filename: '/outputs/x.txt' },
+    { file_id: 'cfile_dir', filename: 'outputs/dir/' },
+    { file_id: 'cfile_none' },
+  ]
+  assert.deepEqual(shellFiles([{ type: 'openrouter:shell', files }]), [{ file_id: 'cfile_ok', filename: 'ok.txt' }])
 })
 
 test('function_call_arguments.delta は output_item.done / response.completed で上書きされる (applyEvent 無変更で足りる)', () => {
