@@ -64,6 +64,9 @@ export const AUTO_MODEL = 'openrouter/auto'
 // MODELS env (カンマ区切り)。ピッカーの表示と Auto Router の行き先の両方に使う
 export const allowedModels = () => (process.env.MODELS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
 
+// MODELS が空なら全モデル許可、設定時は完全一致のみ許可する。auto を使うなら auto 自身も一覧に必要
+export const isModelAllowed = (model: string, allow: string[] = allowedModels()) => !allow.length || allow.includes(model)
+
 // openrouter/auto のとき: 行き先を allow (auto 自身を除く) に限定し、effort 未指定なら high。それ以外のモデルは素通し
 export function autoRouter<T extends { model: string; reasoning?: { effort: string } }>(body: T, allow: string[]): T & { plugins?: unknown[] } {
   if (body.model !== AUTO_MODEL) return body

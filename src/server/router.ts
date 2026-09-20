@@ -4,7 +4,7 @@ import { and, desc, eq, sql, gte, lt } from 'drizzle-orm'
 import { db, schema } from './db/index.js'
 import type { User } from './auth.js'
 import { chatSettings, conversationTitle, serverTools, userPart, type AssistantBody, type ChatSettings, type DbMessage, type Item, type ResponseEvent, type UserBody, type UserPart } from '../shared/types.js'
-import { allowedModels, autoRouter, listModels, responsesStream } from './openrouter.js'
+import { allowedModels, autoRouter, isModelAllowed, listModels, responsesStream } from './openrouter.js'
 import { generateTitle } from './title.js'
 import { itemText } from '../shared/responses.js'
 import { deepestLeaf, pathToRoot, siblings } from './tree.js'
@@ -21,6 +21,11 @@ async function ownConversation(userId: string, id: string) {
   const conv = await db.query.conversations.findFirst({ where: and(eq(conversations.id, id), eq(conversations.userId, userId)) })
   if (!conv) throw new ORPCError('NOT_FOUND')
   return conv
+}
+
+// MODELS の強制。許可リストは起動時固定なので、変更には再起動が必要
+function assertModelAllowed(model: string) {
+  if (!isModelAllowed(model)) throw new ORPCError('BAD_REQUEST', { message: `このモデルは許可されていません: ${model}` })
 }
 
 const models = {
@@ -46,6 +51,7 @@ const conversationsRouter = {
     return { conversation, path: pathToRoot(rows, conversation.leafId), siblings: siblings(rows), active: run ? { parentId: run.parentId } : null }
   }),
   create: base.input(z.object({ settings: chatSettings })).handler(async ({ context, input }) => {
+    assertModelAllowed(input.settings.model)
     const [conv] = await db.insert(conversations).values({ userId: context.user.id, settings: input.settings }).returning()
     return conv
   }),
@@ -55,6 +61,7 @@ const conversationsRouter = {
   }),
   updateSettings: base.input(z.object({ id: z.uuid(), settings: chatSettings })).handler(async ({ context, input }) => {
     await ownConversation(context.user.id, input.id)
+    assertModelAllowed(input.settings.model)
     await db.update(conversations).set({ settings: input.settings }).where(eq(conversations.id, input.id))
   }),
   rename: base.input(z.object({ id: z.uuid(), title: conversationTitle })).handler(async ({ context, input }) => {
@@ -149,6 +156,7 @@ const messagesRouter = {
     )
     .handler(async ({ context, input }) => {
       const conv = await ownConversation(context.user.id, input.conversationId)
+      assertModelAllowed(input.settings.model)
       if (runs.has(conv.id)) throw new ORPCError('CONFLICT', { message: '応答を生成中です' })
       let parentId = input.parentId
       let userMsg: DbMessage | undefined
