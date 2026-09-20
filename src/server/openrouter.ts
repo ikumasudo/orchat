@@ -1,5 +1,5 @@
 import type { Item, ORModel, ResponseEvent } from '../shared/types.js'
-import { itemText } from '../shared/responses.js'
+import { isPublishedFile, itemText } from '../shared/responses.js'
 
 const BASE = 'https://openrouter.ai/api/v1'
 const headers = () => ({
@@ -40,13 +40,14 @@ export async function responsesText(body: Record<string, unknown>): Promise<stri
   return text
 }
 
-// shell item が引用した file_id から、ダウンロードに使う container_id と表示名を引く。
-// 引用に無い file_id は undefined (クライアント指定の container_id は使わない)
+// shell item が引用した公開対象 (outputs/ 配下) の file_id から、ダウンロードに使う container_id と表示名を引く。
+// 引用に無い file_id や outputs/ 外は undefined (クライアント指定の container_id は使わない)
 export function findShellFile(item: Item, fileId: string): { container_id: string; filename: string } | undefined {
+  if (item.type !== 'openrouter:shell') return undefined
   const f = item.files?.find((x) => x.file_id === fileId)
   const container_id = f?.container_id ?? item.container_id
-  if (!f || !container_id) return undefined
-  return { container_id, filename: f.filename ?? fileId }
+  if (!f || !container_id || !isPublishedFile(f.filename)) return undefined
+  return { container_id, filename: f.filename }
 }
 
 // container ファイルの生バイト。所有確認は呼び出し側で済ませてから使う

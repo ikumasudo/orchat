@@ -208,7 +208,8 @@ const messagesRouter = {
             useHistory && (recentChatsPrompt(recent) || 'ユーザーが明示しなくても、以前の相談の続きやユーザー固有の事情・好みが関係しそうな話題なら、まず search_past_chats で過去のチャットを確認してから答えてください。'),
             skills.length > 0 && skillsPrompt(skills),
             // ファイルを /workspace/home の外に書くと保存されず、モデルが sandbox: 等の偽リンクを書く原因になる
-            s.tools?.includes('openrouter:shell') && 'シェルでファイルを作成する場合は /workspace/home 以下に保存してください。ファイルはアプリの画面にダウンロードボタンとして表示されるので、回答にダウンロードURLや sandbox: 形式のリンクを書かないでください。',
+            s.tools?.includes('openrouter:shell') &&
+              'シェルでファイルを作成する場合は /workspace/home 以下に保存してください。ユーザーに渡す最終成果物だけを /workspace/home/outputs/ に保存してください (outputs/ 以外のファイルは画面に表示されません)。表示されるファイルは回答の下にダウンロードボタンとして並ぶので、回答にダウンロードURLや sandbox: 形式のリンクを書かないでください。',
           ]
             .filter(Boolean)
             .join('\n'),
