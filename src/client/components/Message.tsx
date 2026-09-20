@@ -2,7 +2,7 @@ import { cloneElement, createContext, isValidElement, useContext, useEffect, use
 import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CopyIcon, DownloadIcon, FileTextIcon, PencilIcon, RefreshCwIcon } from 'lucide-react'
 import type { Annotation, AssistantBody, DbMessage, Item, UserBody, UserPart } from '../../shared/types.js'
 import { functionLabels, serverTools } from '../../shared/types.js'
-import { isToolItem, itemText, shellFiles, splitStepsAnswer } from '../../shared/responses.js'
+import { isToolItem, itemText, previewType, shellFiles, splitStepsAnswer } from '../../shared/responses.js'
 import {
   Message as AiMessage,
   MessageAction,
@@ -142,22 +142,28 @@ function AssistantContent({ body, streaming, conversationId, messageId }: { body
         <ItemView key={item.id ?? `a${i}`} item={item} streaming={streaming} />
       ))}
       {files.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {files.map((f) =>
-            messageId ? (
-              <Button key={f.file_id} asChild variant="outline" size="sm">
-                <a href={`/messages/${messageId}/files/${f.file_id}`} download>
-                  <DownloadIcon />
-                  {f.filename}
-                </a>
-              </Button>
-            ) : (
-              <Button key={f.file_id} variant="outline" size="sm" disabled>
-                <DownloadIcon />
-                {f.filename}
-              </Button>
-            ),
-          )}
+        <div className="mt-3 flex flex-col items-start gap-3">
+          {files.map((f) => {
+            const url = messageId ? `/messages/${messageId}/files/${f.file_id}` : undefined
+            return (
+              <div key={f.file_id} className="flex min-w-0 max-w-full flex-col items-start gap-2">
+                {url && <FilePreview url={url} name={f.filename} />}
+                {url ? (
+                  <Button asChild variant="outline" size="sm">
+                    <a href={url} download>
+                      <DownloadIcon />
+                      {f.filename}
+                    </a>
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" disabled>
+                    <DownloadIcon />
+                    {f.filename}
+                  </Button>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
       {streaming && !items.length && <span aria-label="生成中" className="my-1.5 block size-3 animate-pulse rounded-full bg-foreground/50" />}
@@ -177,6 +183,36 @@ function AssistantContent({ body, streaming, conversationId, messageId }: { body
       )}
     </MessageContent>
   )
+}
+
+// 生成物のプレビュー。許可した形式だけ表示し、取得失敗・サイズ超過・不明形式は何も出さない (ダウンロードボタンは残る)
+function FilePreview({ url, name }: { url: string; name: string }) {
+  const preview = previewType(name)
+  if (!preview) return null
+  return preview.kind === 'image' ? <ImagePreview src={`${url}?preview=1`} alt={name} /> : <TextPreview src={`${url}?preview=1`} />
+}
+
+function ImagePreview({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return null
+  return <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} className="max-h-96 max-w-full rounded-md border object-contain" />
+}
+
+function TextPreview({ src }: { src: string }) {
+  const [text, setText] = useState<string>()
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let alive = true
+    fetch(src)
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
+      .then((t) => alive && setText(t))
+      .catch(() => alive && setFailed(true))
+    return () => {
+      alive = false
+    }
+  }, [src])
+  if (failed || text == null) return null
+  return <pre className="max-h-96 w-full overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs break-words whitespace-pre-wrap">{text}</pre>
 }
 
 // 思考・ツール利用・途中テキストを 1 つの折りたたみブロックに集約する。

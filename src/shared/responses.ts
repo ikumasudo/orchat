@@ -84,6 +84,33 @@ export function shellFiles(items: Item[]): Array<{ file_id: string; filename: st
   return [...out.values()]
 }
 
+export type PreviewKind = { kind: 'image' | 'text'; mime: string }
+
+// プレビューできる形式は拡張子だけで判定する。SVG / PDF / HTML など能動コンテンツや不明形式は対象外 (ダウンロードのみ)
+const previewTypes: Record<string, PreviewKind> = {
+  png: { kind: 'image', mime: 'image/png' },
+  jpg: { kind: 'image', mime: 'image/jpeg' },
+  jpeg: { kind: 'image', mime: 'image/jpeg' },
+  gif: { kind: 'image', mime: 'image/gif' },
+  webp: { kind: 'image', mime: 'image/webp' },
+  avif: { kind: 'image', mime: 'image/avif' },
+  txt: { kind: 'text', mime: 'text/plain; charset=utf-8' },
+  csv: { kind: 'text', mime: 'text/plain; charset=utf-8' },
+  tsv: { kind: 'text', mime: 'text/plain; charset=utf-8' },
+  json: { kind: 'text', mime: 'text/plain; charset=utf-8' },
+  md: { kind: 'text', mime: 'text/plain; charset=utf-8' },
+  markdown: { kind: 'text', mime: 'text/plain; charset=utf-8' },
+  log: { kind: 'text', mime: 'text/plain; charset=utf-8' },
+  yaml: { kind: 'text', mime: 'text/plain; charset=utf-8' },
+  yml: { kind: 'text', mime: 'text/plain; charset=utf-8' },
+  xml: { kind: 'text', mime: 'text/plain; charset=utf-8' },
+}
+
+export function previewType(filename: string): PreviewKind | undefined {
+  const ext = filename.toLowerCase().split('.').pop() ?? ''
+  return Object.hasOwn(previewTypes, ext) ? previewTypes[ext] : undefined
+}
+
 // ---- ツールループ用 (1 ターンに複数リクエストを流して 1 つの output に連結する) ----
 
 // usage の数値フィールドを合算する (両方数値なら足す、片方だけなら残す、object は再帰)

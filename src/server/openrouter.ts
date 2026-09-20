@@ -55,6 +55,34 @@ export function containerFileContent(containerId: string, fileId: string): Promi
   return fetch(`${BASE}/containers/${encodeURIComponent(containerId)}/files/${encodeURIComponent(fileId)}/content`, { headers: headers() })
 }
 
+// container ファイルのメタデータ (bytes はファイルサイズ)。プレビュー可否の判定に使う
+export async function containerFileBytes(containerId: string, fileId: string): Promise<number | undefined> {
+  const res = await fetch(`${BASE}/containers/${encodeURIComponent(containerId)}/files/${encodeURIComponent(fileId)}`, { headers: headers() })
+  if (!res.ok) return undefined
+  const meta = (await res.json()) as { bytes?: number }
+  return typeof meta.bytes === 'number' ? meta.bytes : undefined
+}
+
+// body の先頭 max バイトだけを流し、上限に達したら上流を cancel する (巨大ファイルを途中で打ち切る)
+export function truncateStream(body: ReadableStream<Uint8Array>, max: number): ReadableStream<Uint8Array> {
+  const reader = body.getReader()
+  let sent = 0
+  return new ReadableStream<Uint8Array>({
+    async pull(ctrl) {
+      const { done, value } = await reader.read()
+      if (done) return ctrl.close()
+      const rest = max - sent
+      ctrl.enqueue(rest >= value.byteLength ? value : value.subarray(0, rest))
+      sent += Math.min(rest, value.byteLength)
+      if (sent >= max) {
+        await reader.cancel().catch(() => {})
+        ctrl.close()
+      }
+    },
+    cancel: (reason) => reader.cancel(reason),
+  })
+}
+
 // `data: ...` 行だけを取り出す最小 SSE パーサ (コメント行 `: OPENROUTER PROCESSING` は捨てる)
 export async function* sseData(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const decoder = new TextDecoder()
